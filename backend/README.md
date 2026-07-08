@@ -13,3 +13,23 @@ pip install -e ".[dev]"
 pytest
 ruff check .
 ```
+
+## Docker
+
+```bash
+docker compose up --build
+curl http://localhost:8000/health
+```
+
+Expected response:
+
+```json
+{"status":"ok"}
+```
+
+## Phase 1 Verification
+
+```bash
+pytest
+ruff check .
+```

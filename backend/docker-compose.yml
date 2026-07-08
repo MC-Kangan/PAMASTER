@@ -1,0 +1,26 @@
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: pa_investing
+      POSTGRES_PASSWORD: pa_investing
+      POSTGRES_DB: pa_investing
+    ports:
+      - "5432:5432"
+    volumes:
+      - pa_postgres_data:/var/lib/postgresql/data
+
+  backend-api:
+    build: .
+    environment:
+      PA_ENVIRONMENT: local
+      PA_DATABASE_URL: postgresql+psycopg://pa_investing:pa_investing@postgres:5432/pa_investing
+      PA_NOTION_ENABLED: "false"
+      PA_LLM_PROVIDER: mock
+    ports:
+      - "8000:8000"
+    depends_on:
+      - postgres
+
+volumes:
+  pa_postgres_data:
