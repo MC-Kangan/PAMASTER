@@ -29,8 +29,9 @@ class StopReferenceRule:
             portfolio_nav=portfolio_nav,
         )
         symbol = position.instrument.symbol
+        signal_id = f"sig-{uuid4().hex}"
         return Signal(
-            signal_id=f"sig-{uuid4().hex}",
+            signal_id=signal_id,
             symbol=symbol,
             signal_type=SignalType.STOP_REFERENCE,
             severity=SignalSeverity.HIGH,
@@ -42,5 +43,5 @@ class StopReferenceRule:
             deterministic_recommendation=sizing.message,
             audit_id=f"audit-{uuid4().hex}",
             created_at=datetime.now(tz=UTC),
-            analytics_path=f"/analysis/signal/{symbol}",
+            analytics_path=f"/analysis/signal/{signal_id}",
         )

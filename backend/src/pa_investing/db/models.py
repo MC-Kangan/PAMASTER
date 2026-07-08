@@ -92,3 +92,24 @@ class SignalRecord(Base):
     audit_id: Mapped[str] = mapped_column(String(64), nullable=False)
     created_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)
     analytics_path: Mapped[str | None] = mapped_column(String(512), nullable=True)
+
+
+class AuditEventRecord(Base):
+    __tablename__ = "audit_events"
+
+    audit_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    event_type: Mapped[str] = mapped_column(String(64), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)
+    message: Mapped[str] = mapped_column(String(1024), nullable=False)
+
+
+class PortfolioSnapshotRecord(Base):
+    __tablename__ = "portfolio_snapshots"
+
+    snapshot_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    observed_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)
+    base_currency: Mapped[str] = mapped_column(String(8), nullable=False)
+    nav: Mapped[Decimal] = mapped_column(Numeric(24, 8), nullable=False)
+    gross_exposure: Mapped[Decimal] = mapped_column(Numeric(24, 8), nullable=False)
+    net_exposure: Mapped[Decimal] = mapped_column(Numeric(24, 8), nullable=False)
+    unrealized_pnl: Mapped[Decimal] = mapped_column(Numeric(24, 8), nullable=False)

@@ -29,6 +29,8 @@ def test_stop_reference_rule_creates_signal_when_price_breaches_stop() -> None:
     assert signal.severity == SignalSeverity.HIGH
     assert "stop/reference level 95" in signal.message
     assert signal.deterministic_recommendation.startswith("Reduce")
+    assert signal.analytics_path is not None
+    assert signal.analytics_path.endswith(signal.signal_id)
 
 
 def test_stop_reference_rule_ignores_invalid_latest_prices() -> None:

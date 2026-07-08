@@ -4,15 +4,25 @@ from datetime import UTC, datetime
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from pa_investing.audit.events import AuditEvent
 from pa_investing.db.models import (
     AccountRecord,
+    AuditEventRecord,
     InstrumentRecord,
+    PortfolioSnapshotRecord,
     PositionRecord,
     PriceRecord,
     SignalRecord,
 )
 from pa_investing.domain.enums import AssetClass, SignalSeverity, SignalStatus, SignalType
-from pa_investing.domain.models import Account, Instrument, Position, PricePoint, Signal
+from pa_investing.domain.models import (
+    Account,
+    Instrument,
+    PortfolioSnapshot,
+    Position,
+    PricePoint,
+    Signal,
+)
 
 
 def _instrument_from_record(record: InstrumentRecord) -> Instrument:
@@ -151,6 +161,37 @@ class PriceRepository:
             )
             for symbol, (price_record, instrument_record) in latest.items()
         }
+
+
+class AuditEventRepository:
+    def __init__(self, session: Session) -> None:
+        self.session = session
+
+    def upsert(self, event: AuditEvent) -> None:
+        record = self.session.get(AuditEventRecord, event.audit_id)
+        if record is None:
+            record = AuditEventRecord(audit_id=event.audit_id)
+            self.session.add(record)
+        record.event_type = event.event_type
+        record.created_at = _normalize_utc_timestamp(event.created_at)
+        record.message = event.message
+
+
+class PortfolioSnapshotRepository:
+    def __init__(self, session: Session) -> None:
+        self.session = session
+
+    def upsert(self, snapshot: PortfolioSnapshot) -> None:
+        record = self.session.get(PortfolioSnapshotRecord, snapshot.snapshot_id)
+        if record is None:
+            record = PortfolioSnapshotRecord(snapshot_id=snapshot.snapshot_id)
+            self.session.add(record)
+        record.observed_at = _normalize_utc_timestamp(snapshot.observed_at)
+        record.base_currency = snapshot.base_currency
+        record.nav = snapshot.nav
+        record.gross_exposure = snapshot.gross_exposure
+        record.net_exposure = snapshot.net_exposure
+        record.unrealized_pnl = snapshot.unrealized_pnl
 
 
 class SignalRepository:
