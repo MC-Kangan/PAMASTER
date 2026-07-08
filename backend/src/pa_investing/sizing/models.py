@@ -13,6 +13,8 @@ class SizingRecommendation(BaseModel):
 
 class MaxNavWeightSizingModel:
     def __init__(self, max_weight: Decimal) -> None:
+        if max_weight <= 0 or max_weight > 1:
+            raise ValueError("max_weight must be greater than 0 and less than or equal to 1")
         self.max_weight = max_weight
 
     def recommend_reduction(
@@ -20,7 +22,17 @@ class MaxNavWeightSizingModel:
         position: Position,
         portfolio_nav: Decimal,
     ) -> SizingRecommendation:
-        if position.latest_price is None or portfolio_nav <= 0:
+        if position.latest_price is None or position.latest_price <= 0:
+            return SizingRecommendation(
+                symbol=position.instrument.symbol,
+                quantity_to_reduce=Decimal("0"),
+                message=(
+                    f"No reduction for {position.instrument.symbol}; "
+                    "missing, zero, or negative latest price."
+                ),
+            )
+
+        if portfolio_nav <= 0:
             return SizingRecommendation(
                 symbol=position.instrument.symbol,
                 quantity_to_reduce=Decimal("0"),
