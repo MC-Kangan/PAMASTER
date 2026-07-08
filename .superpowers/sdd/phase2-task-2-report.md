@@ -61,3 +61,33 @@ Covered behaviors:
 
 - `LiveNotionClient.upsert_page` currently performs a create-page request and embeds `External ID` for future idempotent matching, but it does not yet query/update an existing Notion page with the same external id.
 - The request serializer assumes a `Name` title property and rich-text-compatible destination properties in the target Notion databases.
+
+## Review follow-up fix
+
+- Updated `LiveNotionClient.upsert_page` to perform a real upsert:
+  - query the configured database by `External ID`
+  - `POST /v1/pages` only when no existing page matches
+  - `PATCH /v1/pages/{page_id}` when an existing page is found
+- Split Notion payload serialization into shared property serialization plus create/update request bodies so the update path can patch properties without trying to recreate page children.
+- Extended live-client tests to cover:
+  - update-on-match behavior
+  - repeated upsert behavior staying idempotent across calls for the same `external_id`
+
+## Additional TDD Evidence For Review Fix
+
+1. Added new failing tests first in `backend/tests/unit/test_live_notion_client.py`:
+   - `test_live_notion_client_updates_existing_page_when_external_id_matches`
+   - `test_live_notion_client_repeated_upsert_is_idempotent`
+2. Ran the focused suite before changing production code.
+3. Verified red state:
+   - the update-path test failed because the client still posted directly to `/v1/pages`
+   - the repeated-upsert test failed because the second write created again instead of querying then patching
+4. Implemented the minimal code to:
+   - query by `External ID`
+   - create on miss
+   - patch on hit
+5. Re-ran the same focused suite and verified green: `6 passed`.
+
+## Updated issues or concerns
+
+- The live upsert path now performs the required lookup and patch flow, but it still assumes the target database schema exposes `Name` and `External ID` with the expected Notion property types.

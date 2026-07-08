@@ -6,7 +6,7 @@ class NotionPagePayload(BaseModel):
     properties: dict[str, str]
     body: str
 
-    def to_notion_create_body(self, database_id: str, external_id: str) -> dict[str, object]:
+    def to_notion_properties(self, external_id: str) -> dict[str, object]:
         notion_properties: dict[str, object] = {
             "Name": {
                 "title": [
@@ -39,9 +39,12 @@ class NotionPagePayload(BaseModel):
                 ]
             }
 
+        return notion_properties
+
+    def to_notion_create_body(self, database_id: str, external_id: str) -> dict[str, object]:
         return {
             "parent": {"database_id": database_id},
-            "properties": notion_properties,
+            "properties": self.to_notion_properties(external_id=external_id),
             "children": [
                 {
                     "object": "block",
@@ -58,4 +61,9 @@ class NotionPagePayload(BaseModel):
                     },
                 }
             ],
+        }
+
+    def to_notion_update_body(self, external_id: str) -> dict[str, object]:
+        return {
+            "properties": self.to_notion_properties(external_id=external_id),
         }
