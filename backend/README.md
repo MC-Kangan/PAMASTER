@@ -16,6 +16,14 @@ ruff check .
 
 ## Docker
 
+Run the database migration once before starting the API container for a fresh Postgres volume:
+
+```bash
+docker compose run --rm backend-api alembic upgrade head
+```
+
+Then start the stack:
+
 ```bash
 docker compose up --build
 curl http://localhost:8000/health

@@ -53,3 +53,40 @@ Additional environment check:
 
 - Docker is unavailable in this environment, so `docker compose config` could not be validated here.
 - No application logic changed, so the risk is limited to deployment/configuration correctness.
+
+## Task 12 migration-path fix follow-up
+
+## What changed
+
+- Updated `backend/Dockerfile` to copy `backend/alembic.ini` and the `backend/alembic/` migration package into the image alongside the app sources.
+- Updated `backend/README.md` to add an explicit migration step for fresh environments:
+  - `docker compose run --rm backend-api alembic upgrade head`
+  - then `docker compose up --build`
+
+## Verification commands and outputs
+
+- `cd backend && pytest`
+  - Exit code: `127`
+  - Output: `zsh:1: command not found: pytest`
+- `cd backend && ruff check .`
+  - Exit code: `127`
+  - Output: `zsh:1: command not found: ruff`
+- `cd backend && docker compose config`
+  - Exit code: `127`
+  - Output: `zsh:1: command not found: docker`
+- `cd backend && ./.venv/bin/pytest`
+  - Exit code: `0`
+  - Result: `28 passed, 1 warning in 1.54s`
+- `cd backend && ./.venv/bin/ruff check .`
+  - Exit code: `0`
+  - Result: `All checks passed!`
+
+## Whether Docker CLI was available
+
+- No. `docker` was not on PATH in this environment.
+
+## Self-review notes
+
+- The image now contains the Alembic config and version scripts needed for `alembic upgrade head`.
+- The runbook gives a concrete one-off migration command instead of silently assuming automatic schema creation.
+- I did not change application behavior or trading/order logic.
