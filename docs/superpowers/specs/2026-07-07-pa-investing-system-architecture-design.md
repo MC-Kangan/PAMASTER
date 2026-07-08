@@ -6,12 +6,13 @@ Date: 2026-07-07
 
 Design a growing personal-account investing workflow for low-frequency PA investing. The system should help collect information, maintain investment theses, monitor portfolio risk, generate rule-based signals, summarize knowledge with LLMs, and support future analytics scripts without forcing a full custom app from day one.
 
-The chosen architecture is Notion-first:
+The chosen architecture is agent-backend-first, with Notion as the first user interface:
 
-- Notion is the command center and simple frontend.
-- Python agents and services are the compute layer.
+- Notion is the initial command center and simple frontend.
+- Python agents and services are the compute layer and long-term system core.
 - PostgreSQL is the structured source of truth.
 - A lightweight analytics app provides interactive charts and deeper analysis when Notion is insufficient.
+- A future custom app can replace or reduce Notion when the workflow benefits from a more unified interface.
 - Obsidian remains the durable long-form knowledge vault.
 
 The system does not trade or place broker orders.
@@ -19,12 +20,12 @@ The system does not trade or place broker orders.
 ## Architecture Summary
 
 ```text
-Notion workspace
-  Command center, mobile capture, watchlists, theses, signals, daily review
+Frontend adapters
+  Notion, future custom app, analytics cockpit, optional OpenClaw/chat interface
         |
-        | Notion API, webhooks, scheduled sync
+        | API calls, webhooks, scheduled sync, deep links
         v
-Python backend and agents
+Python backend, agents, and deterministic tools
   Broker import, prices, portfolio metrics, risk rules, sizing, LLM workflows
         |
         v
@@ -32,21 +33,23 @@ PostgreSQL
   Accounts, positions, prices, snapshots, signals, audit logs
         |
         v
-Analytics app
-  Streamlit or Plotly Dash pages for interactive charts and drilldowns
+Knowledge sources
+  Notion summaries, Obsidian vault, source URLs, broker/market data
         |
         v
-Obsidian vault
-  Long-form evergreen knowledge, book notes, playbooks, technical guides
+Analytics app
+  Interactive charts, portfolio drilldowns, signal details, backtests
 ```
 
-Notion is the human operating surface. Python and PostgreSQL own numerical truth, security-sensitive data, and repeatable analytics. The analytics app is linked or embedded from Notion for richer charts. Obsidian is used for durable markdown knowledge that should remain portable and easy to version or re-index later.
+Notion is the first human operating surface. Python and PostgreSQL own numerical truth, security-sensitive data, repeatable analytics, and agent orchestration. The analytics app is linked or embedded from Notion for richer charts. Obsidian is used for durable markdown knowledge that should remain portable and easy to version or re-index later.
+
+The frontend can change over time. The core investment logic should not be trapped inside Notion, Lovable, Base44, Codex Sites, OpenClaw, or any other UI/runtime product.
 
 ## Why Not A Full Custom App First
 
 A full React or mobile app would provide maximum UX control and richer interactive dashboards, but it would front-load frontend, authentication, deployment, and mobile support work. That effort would slow down the more valuable early work: broker import, price sync, risk logic, signal generation, LLM summarization, and thesis workflow.
 
-The Notion-first architecture is a known low-code-plus-backend pattern:
+The chosen architecture uses a known low-code-plus-backend pattern at the user-interface layer:
 
 ```text
 Low-code workspace
@@ -56,7 +59,7 @@ custom backend and agents
 real database
 ```
 
-This is common with tools such as Notion, Airtable, Retool, internal dashboards, and automation platforms. The important boundary is that Notion is not treated as the analytical database or charting engine.
+This is common with tools such as Notion, Airtable, Retool, internal dashboards, and automation platforms. The important boundary is that Notion is not treated as the analytical database, charting engine, or agent runtime. It is the first UI adapter.
 
 ## Notion Responsibilities
 
@@ -118,6 +121,19 @@ The backend exposes:
 - background workers for LLM summarization and knowledge indexing;
 - reusable Python modules for analytics and future research scripts.
 
+The backend also owns the multi-agent orchestration layer. Specialist agents may be added over time, but they should call registered backend tools instead of reaching directly into broker APIs, databases, or the filesystem.
+
+Recommended agent roles:
+
+- `SupervisorAgent`: coordinates specialist outputs, resolves conflicts, and writes the final review.
+- `TechnicalAnalysisAgent`: analyzes price history, indicators, trend state, and triggered technical rules.
+- `PortfolioOptimisationAgent`: reviews holdings, risk budgets, exposures, covariance/volatility estimates, and sizing outputs.
+- `MacroAgent`: summarizes macro context, rates/FX/commodity regimes, and macro-sensitive risks.
+- `ThesisAgent`: compares new information against Notion theses and Obsidian knowledge.
+- `RiskOfficerAgent`: checks stop rules, concentration, holding-period constraints, PA policy constraints, and audit requirements.
+
+Agents must be treated as analysts, not traders. They can request deterministic tools, explain results, and write recommendations for review. They cannot place orders or invent sizing numbers without a sizing/risk tool result.
+
 ## PostgreSQL Responsibilities
 
 PostgreSQL is the structured source of truth for numerical and auditable data.
@@ -142,9 +158,12 @@ Notion records should contain references to database ids where needed. If Notion
 
 Notion will not be forced to render complex analytics. For interactive charts and deeper analysis, use a linked analytics app.
 
-Recommended first implementation:
+Possible implementations:
 
-- Streamlit or Plotly Dash, because both are Python-native and fast for analytics-heavy workflows.
+- Codex Sites or a custom app built in this repo, because this maximizes ownership and maintainability.
+- Lovable, if fast polished app generation is more valuable than repo-first control for an early dashboard.
+- Base44, if no-code workflow experiments, built-in app data, and automations are more valuable than code ownership.
+- Streamlit or Plotly Dash, if Python-native speed matters more than product polish.
 
 Examples:
 
@@ -165,7 +184,9 @@ https://your-domain/analysis/position/<position_id>
 https://your-domain/analysis/portfolio
 ```
 
-The analytics app can later be replaced by a custom React frontend if richer UX becomes necessary. It should read from PostgreSQL or backend APIs so the replacement does not disturb analytics logic.
+The analytics app should read from PostgreSQL or backend APIs so the UI implementation can change without disturbing analytics logic. The first version can be simple. Over time, this layer can become the all-in-one app if Notion becomes too fragmented.
+
+Notion should link to or embed the analytics app rather than trying to become the charting platform.
 
 ## Broker And Market Data Strategy
 
@@ -276,6 +297,59 @@ LLMProvider
 
 The provider should be configurable so OpenAI, Anthropic, DeepSeek, GLM, or later models can be swapped without rewriting workflows.
 
+## Agent Architecture
+
+The long-term architecture should be backend-owned multi-agent orchestration with UI adapters.
+
+```text
+Frontend adapters
+  Notion
+  future custom app
+  analytics dashboard
+  optional OpenClaw/chat interface
+        |
+        v
+Agent API
+  run_daily_review()
+  explain_signal()
+  analyze_position()
+  summarize_capture()
+  challenge_thesis()
+        |
+        v
+Agent orchestrator
+  supervisor, specialist agents, permissions, run state, audit
+        |
+        v
+Deterministic tools
+  risk, sizing, backtest, optimization, market data, knowledge retrieval
+        |
+        v
+PostgreSQL and knowledge index
+```
+
+This makes the frontend replaceable. Notion can be the first operating surface; a custom app can become the unified interface later; OpenClaw or another assistant can be added as a messaging interface without becoming the system of record.
+
+OpenClaw is suitable as an optional command surface, not as the financial brain. A safe pattern is:
+
+```text
+OpenClaw/chat message
+  "Run macro review for my PA portfolio"
+        |
+        v
+Backend Agent API
+  authenticated request with limited scope
+        |
+        v
+Controlled backend workflow
+  macro agent + risk officer + audit logs
+        |
+        v
+Result written to Notion, analytics app, or chat
+```
+
+OpenClaw-style agents can have broad local access if misconfigured, so any integration must use narrow backend API endpoints, sandboxing, explicit permissions, and audit logs. The PA system should not expose broker credentials, database superuser access, or shell/filesystem access through an assistant interface.
+
 ## Obsidian Role
 
 Obsidian is the deeper knowledge library, not the daily command center.
@@ -356,22 +430,114 @@ Deliver:
 7. Rule-based signal generation.
 8. Deterministic sizing interface with one simple model.
 9. Notion sync for accounts, holdings, signals, and daily review.
-10. Minimal analytics app with linked portfolio and signal pages.
-11. Optional LLM summarization interface for notes, initially configurable or mockable.
+10. Backend `Agent API` skeleton with one simple daily-review or signal-explanation workflow.
+11. Minimal analytics link target for portfolio and signal pages.
+12. Optional LLM summarization interface for notes, initially configurable or mockable.
 
-## Later Phases
+## Phased Roadmap
 
-Potential growth path:
+The roadmap should keep the backend and data model ahead of the UI. Notion is the first frontend, not a permanent constraint.
 
-1. Coinbase read-only connector.
-2. Interactive Brokers read-only connector.
-3. Obsidian indexing and retrieval.
-4. LLM thesis challenge workflow.
-5. Backtesting module.
-6. More advanced risk and sizing models.
-7. Notification channels beyond Notion.
-8. Richer analytics app or custom React frontend if Streamlit/Dash becomes limiting.
-9. Optional self-hosted automation layer such as n8n for glue workflows.
+### Phase 0: Architecture And Operating Principles
+
+Deliver the design document, choose the first architecture, and define the non-negotiable boundaries:
+
+- no order placement;
+- read-only broker access;
+- deterministic sizing and risk tools;
+- agent outputs audited;
+- Notion is a UI adapter;
+- PostgreSQL is the source of truth;
+- future app builders must call backend APIs instead of owning core logic.
+
+### Phase 1: Notion Command Center And Backend Foundation
+
+Build the first usable workflow:
+
+- Notion databases for dashboard, accounts, holdings, watchlist, signals, theses, notes inbox, and daily review;
+- Python backend skeleton;
+- PostgreSQL schema and migrations;
+- CSV/manual position import;
+- free/delayed price provider;
+- NAV, PnL, exposure, and basic risk metrics;
+- simple rule-based signals;
+- deterministic sizing interface with one conservative model;
+- Notion sync for key metrics, holdings, signals, and daily review;
+- LLM note summarization behind a provider interface.
+
+Success criterion: the daily PA workflow can happen in Notion, with structured data and calculations owned by the backend.
+
+### Phase 2: Agent Orchestration Foundation
+
+Add the backend-owned agent layer:
+
+- Agent API endpoints such as `run_daily_review`, `explain_signal`, `analyze_position`, and `summarize_capture`;
+- supervisor workflow;
+- tool permission model;
+- audit logging for prompts, tool calls, retrieved context, and outputs;
+- provider-swappable LLM interface;
+- compact-summary retrieval to control token cost.
+
+Success criterion: agents can explain and challenge signals using controlled tools without owning trade execution or sizing logic.
+
+### Phase 3: Specialist Investment Agents
+
+Add agents one by one:
+
+- Technical Analysis Agent;
+- Portfolio Optimisation Agent;
+- Macro Agent;
+- Thesis/Fundamental Agent;
+- Risk Officer Agent.
+
+Each agent must have a narrow tool list, test fixtures, and clear output schema. Numeric recommendations must cite deterministic tools.
+
+Success criterion: multi-agent review produces a structured investment memo or signal explanation with disagreements and uncertainty visible.
+
+### Phase 4: Interactive Analytics Cockpit
+
+Add richer analysis pages linked from Notion:
+
+- portfolio NAV and PnL charts;
+- drawdown and risk charts;
+- position drilldowns;
+- signal-specific pages;
+- price charts with entry/stop/reference levels;
+- backtest result pages;
+- scenario and sizing calculators.
+
+Candidate implementation paths:
+
+- Codex Sites or custom app for code ownership;
+- Lovable for fast polished prototype;
+- Base44 for no-code workflow experiments;
+- Streamlit or Plotly Dash for Python-native speed.
+
+Success criterion: Notion gives the overview, and one click opens deeper interactive analysis.
+
+### Phase 5: Broker Connectors And Knowledge Expansion
+
+Expand data inputs:
+
+- Coinbase read-only connector;
+- Interactive Brokers read-only connector;
+- Obsidian indexing and retrieval;
+- richer thesis challenge workflow;
+- broader price/history provider support;
+- optional notifications beyond Notion.
+
+Success criterion: manual imports are no longer the only way to update portfolio state, and agents can cite both current data and durable knowledge.
+
+### Phase 6: Optional Assistant And All-In-One App
+
+Add convenience surfaces only after the backend is stable:
+
+- OpenClaw or another assistant as a restricted messaging interface;
+- n8n or another automation layer for glue workflows, if useful;
+- custom all-in-one app if Notion plus linked analytics becomes too fragmented;
+- React or another full frontend if app-builder prototypes become limiting.
+
+Success criterion: the user can choose between Notion, app, and assistant surfaces without changing the core investment logic.
 
 ## Explicit Non-Goals
 
@@ -381,6 +547,7 @@ Potential growth path:
 - No treating Notion as the only source of portfolio truth.
 - No full custom app in phase 1.
 - No formal plugin system in phase 1; use explicit Python interfaces first.
+- No letting an agent framework directly control broker credentials, shell access, or database admin access.
 
 ## Sources Checked
 
@@ -392,4 +559,10 @@ Potential growth path:
 - Coinbase Advanced Trade API: https://docs.cdp.coinbase.com/coinbase-app/advanced-trade-apis/rest-api
 - Interactive Brokers Client Portal API: https://www.interactivebrokers.com/campus/ibkr-api-page/cpapi-v1/
 - IBKR market data pricing: https://www.interactivebrokers.com/en/pricing/market-data-pricing.php
-
+- Lovable documentation: https://docs.lovable.dev/introduction/welcome
+- Lovable integrations: https://docs.lovable.dev/integrations/introduction
+- Base44 integrations: https://docs.base44.com/Integrations/Using-integrations
+- Base44 custom integrations: https://docs.base44.com/documentation/integrations/using-custom-integrations
+- Codex app documentation: https://developers.openai.com/codex/app
+- Codex Sites: https://developers.openai.com/showcase/sites
+- OpenClaw GitHub: https://github.com/openclaw/openclaw
