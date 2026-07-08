@@ -31,6 +31,27 @@ def test_stop_reference_rule_creates_signal_when_price_breaches_stop() -> None:
     assert signal.deterministic_recommendation.startswith("Reduce")
 
 
+def test_stop_reference_rule_ignores_invalid_latest_prices() -> None:
+    rule = StopReferenceRule(sizing_model=MaxNavWeightSizingModel(max_weight=Decimal("0.10")))
+
+    for latest_price in (None, Decimal("0"), Decimal("-1")):
+        position = Position(
+            account_id="manual-pa",
+            instrument=Instrument(symbol="AAPL", name="Apple Inc.", asset_class=AssetClass.EQUITY),
+            quantity=Decimal("100"),
+            average_cost=Decimal("100"),
+            latest_price=latest_price,
+        )
+
+        signal = rule.evaluate(
+            position=position,
+            stop_price=Decimal("95"),
+            portfolio_nav=Decimal("100000"),
+        )
+
+        assert signal is None
+
+
 def test_signal_service_returns_signals_only_for_matching_breached_stops() -> None:
     positions = [
         Position(

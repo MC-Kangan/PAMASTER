@@ -17,7 +17,11 @@ class StopReferenceRule:
         stop_price: Decimal,
         portfolio_nav: Decimal,
     ) -> Signal | None:
-        if position.latest_price is None or position.latest_price > stop_price:
+        if (
+            position.latest_price is None
+            or position.latest_price <= 0
+            or position.latest_price > stop_price
+        ):
             return None
 
         sizing = self.sizing_model.recommend_reduction(
