@@ -45,3 +45,24 @@ def test_build_portfolio_snapshot() -> None:
     assert snapshot.nav == Decimal("1750")
     assert snapshot.unrealized_pnl == Decimal("250")
     assert snapshot.gross_exposure == Decimal("1750")
+
+
+def test_signed_positions_use_absolute_gross_exposure() -> None:
+    positions = [
+        _position("AAPL", AssetClass.EQUITY, "10", "100", "100"),
+        _position("TSLA", AssetClass.EQUITY, "-20", "100", "100"),
+    ]
+
+    snapshot = build_portfolio_snapshot(
+        snapshot_id="snap-2",
+        positions=positions,
+        observed_at=datetime(2026, 7, 8, tzinfo=UTC),
+        base_currency="USD",
+    )
+
+    assert calculate_nav(positions) == Decimal("-1000")
+    assert calculate_exposure_by_asset_class(positions) == {
+        AssetClass.EQUITY: Decimal("3000"),
+    }
+    assert snapshot.net_exposure == Decimal("-1000")
+    assert snapshot.gross_exposure == Decimal("3000")

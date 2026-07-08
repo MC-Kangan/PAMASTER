@@ -35,3 +35,20 @@ Both passed after implementation.
 ## Any issues or concerns
 
 - None.
+
+## Review fix addendum
+
+- Updated exposure semantics so `nav` and `net_exposure` remain signed net market value, while `gross_exposure` now uses absolute market exposure.
+- Changed exposure by asset class to aggregate absolute market value so short positions contribute positively.
+- Added a regression test in [`backend/tests/unit/test_metrics.py`](</Users/chenkangan/Documents/PAMASTER/backend/tests/unit/test_metrics.py:1>) covering a long position plus a short position in the same asset class.
+
+### TDD evidence for the review fix
+
+- RED command: `cd backend && ./.venv/bin/pytest tests/unit/test_metrics.py -k signed_positions_use_absolute_gross_exposure -v`
+- RED result: failed as expected because `calculate_exposure_by_asset_class` still returned signed exposure for `AssetClass.EQUITY`:
+  - expected `Decimal("3000")`
+  - actual `Decimal("-1000")`
+- GREEN command: `cd backend && ./.venv/bin/pytest tests/unit/test_metrics.py -v`
+- GREEN result: `3 passed in 0.05s`
+- Lint command: `cd backend && ./.venv/bin/ruff check .`
+- Lint result: `All checks passed!`
