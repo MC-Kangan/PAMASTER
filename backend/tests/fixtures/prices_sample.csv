@@ -1,0 +1,4 @@
+symbol,name,asset_class,currency,price,observed_at
+AAPL,Apple Inc.,equity,USD,175,2026-07-08T16:00:00+00:00
+SPY,SPDR S&P 500 ETF,etf,USD,510,2026-07-08T16:00:00+00:00
+BTC-USD,Bitcoin,crypto,USD,62000,2026-07-08T16:00:00+00:00
