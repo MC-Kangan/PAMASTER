@@ -5,6 +5,7 @@ from pa_investing.notion.schemas import NotionPagePayload
 
 NOTION_API_URL = "https://api.notion.com/v1/pages"
 NOTION_DATABASE_URL = "https://api.notion.com/v1/databases"
+NOTION_BLOCK_URL = "https://api.notion.com/v1/blocks"
 NOTION_VERSION = "2022-06-28"
 
 
@@ -102,7 +103,60 @@ class LiveNotionClient(NotionClient):
             json=payload.to_notion_update_body(external_id=external_id),
         )
         response.raise_for_status()
+        self._sync_page_body(
+            client=client,
+            page_id=page_id,
+            payload=payload,
+        )
         return response.json()["id"]
+
+    def _sync_page_body(
+        self,
+        client: httpx.Client,
+        page_id: str,
+        payload: NotionPagePayload,
+    ) -> None:
+        response = client.get(
+            f"{NOTION_BLOCK_URL}/{page_id}/children",
+            headers=self._headers(),
+        )
+        response.raise_for_status()
+        results = response.json().get("results", [])
+        for block in results:
+            if block.get("type") != "paragraph":
+                continue
+            existing_body = self._extract_paragraph_text(block)
+            if existing_body == payload.body:
+                return
+            block_id = block["id"]
+            update_response = client.patch(
+                f"{NOTION_BLOCK_URL}/{block_id}",
+                headers=self._headers(),
+                json=payload.to_notion_block_update_body(),
+            )
+            update_response.raise_for_status()
+            return
+
+    @staticmethod
+    def _extract_paragraph_text(block: dict[str, object]) -> str:
+        paragraph = block.get("paragraph", {})
+        if not isinstance(paragraph, dict):
+            return ""
+        rich_text = paragraph.get("rich_text", [])
+        if not isinstance(rich_text, list):
+            return ""
+
+        parts: list[str] = []
+        for item in rich_text:
+            if not isinstance(item, dict):
+                continue
+            text = item.get("text", {})
+            if not isinstance(text, dict):
+                continue
+            content = text.get("content", "")
+            if isinstance(content, str):
+                parts.append(content)
+        return "".join(parts)
 
     def _headers(self) -> dict[str, str]:
         return {

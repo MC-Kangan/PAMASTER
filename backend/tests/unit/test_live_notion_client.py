@@ -68,6 +68,29 @@ def test_live_notion_client_updates_existing_page_when_external_id_matches() -> 
         if request.method == "PATCH" and str(request.url) == "https://api.notion.com/v1/pages/notion-page-1":
             return httpx.Response(200, json={"id": "notion-page-1", "object": "page"})
 
+        if request.method == "GET" and str(request.url) == "https://api.notion.com/v1/blocks/notion-page-1/children":
+            return httpx.Response(
+                200,
+                json={
+                    "results": [
+                        {
+                            "id": "body-block-1",
+                            "type": "paragraph",
+                            "paragraph": {
+                                "rich_text": [
+                                    {
+                                        "type": "text",
+                                        "text": {
+                                            "content": "Signal body",
+                                        },
+                                    }
+                                ]
+                            },
+                        }
+                    ]
+                },
+            )
+
         raise AssertionError(f"Unexpected request: {request.method} {request.url}")
 
     payload = NotionPagePayload(
@@ -84,7 +107,7 @@ def test_live_notion_client_updates_existing_page_when_external_id_matches() -> 
     page_id = client.upsert_page("Signals", "sig-1", payload)
 
     assert page_id == "notion-page-1"
-    assert [method for method, _, _ in requests] == ["POST", "PATCH"]
+    assert [method for method, _, _ in requests] == ["POST", "PATCH", "GET"]
     assert requests[0][1] == "https://api.notion.com/v1/databases/signals-db/query"
     assert requests[0][2] == {
         "filter": {
@@ -120,6 +143,29 @@ def test_live_notion_client_repeated_upsert_is_idempotent() -> None:
         if request.method == "PATCH" and str(request.url) == "https://api.notion.com/v1/pages/notion-page-1":
             return httpx.Response(200, json={"id": "notion-page-1", "object": "page"})
 
+        if request.method == "GET" and str(request.url) == "https://api.notion.com/v1/blocks/notion-page-1/children":
+            return httpx.Response(
+                200,
+                json={
+                    "results": [
+                        {
+                            "id": "body-block-1",
+                            "type": "paragraph",
+                            "paragraph": {
+                                "rich_text": [
+                                    {
+                                        "type": "text",
+                                        "text": {
+                                            "content": "Signal body",
+                                        },
+                                    }
+                                ]
+                            },
+                        }
+                    ]
+                },
+            )
+
         raise AssertionError(f"Unexpected request: {request.method} {request.url}")
 
     payload = NotionPagePayload(
@@ -138,8 +184,81 @@ def test_live_notion_client_repeated_upsert_is_idempotent() -> None:
 
     assert first_page_id == "notion-page-1"
     assert second_page_id == "notion-page-1"
-    assert [method for method, _, _ in requests] == ["POST", "POST", "POST", "PATCH"]
+    assert [method for method, _, _ in requests] == ["POST", "POST", "POST", "PATCH", "GET"]
     assert requests[0][1] == "https://api.notion.com/v1/databases/signals-db/query"
     assert requests[1][1] == "https://api.notion.com/v1/pages"
     assert requests[2][1] == "https://api.notion.com/v1/databases/signals-db/query"
     assert requests[3][1] == "https://api.notion.com/v1/pages/notion-page-1"
+    assert requests[4][1] == "https://api.notion.com/v1/blocks/notion-page-1/children"
+
+
+def test_live_notion_client_updates_existing_page_body_content() -> None:
+    requests: list[tuple[str, str, dict[str, object]]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.content.decode("utf-8")) if request.content else {}
+        requests.append((request.method, str(request.url), body))
+
+        if request.method == "POST" and str(request.url) == "https://api.notion.com/v1/databases/signals-db/query":
+            return httpx.Response(200, json={"results": [{"id": "notion-page-1"}]})
+
+        if request.method == "PATCH" and str(request.url) == "https://api.notion.com/v1/pages/notion-page-1":
+            return httpx.Response(200, json={"id": "notion-page-1", "object": "page"})
+
+        if request.method == "GET" and str(request.url) == "https://api.notion.com/v1/blocks/notion-page-1/children":
+            return httpx.Response(
+                200,
+                json={
+                    "results": [
+                        {
+                            "id": "body-block-1",
+                            "type": "paragraph",
+                            "paragraph": {
+                                "rich_text": [
+                                    {
+                                        "type": "text",
+                                        "text": {
+                                            "content": "Old body",
+                                        },
+                                    }
+                                ]
+                            },
+                        }
+                    ]
+                },
+            )
+
+        if request.method == "PATCH" and str(request.url) == "https://api.notion.com/v1/blocks/body-block-1":
+            return httpx.Response(200, json={"id": "body-block-1", "object": "block"})
+
+        raise AssertionError(f"Unexpected request: {request.method} {request.url}")
+
+    payload = NotionPagePayload(
+        title="AAPL stop_reference",
+        properties={"Symbol": "AAPL"},
+        body="Updated signal body",
+    )
+    client = LiveNotionClient(
+        api_key="notion-secret",
+        database_ids={"Signals": "signals-db"},
+        transport=httpx.MockTransport(handler),
+    )
+
+    page_id = client.upsert_page("Signals", "sig-1", payload)
+
+    assert page_id == "notion-page-1"
+    assert [method for method, _, _ in requests] == ["POST", "PATCH", "GET", "PATCH"]
+    assert requests[2][1] == "https://api.notion.com/v1/blocks/notion-page-1/children"
+    assert requests[3][1] == "https://api.notion.com/v1/blocks/body-block-1"
+    assert requests[3][2] == {
+        "paragraph": {
+            "rich_text": [
+                {
+                    "type": "text",
+                    "text": {
+                        "content": "Updated signal body",
+                    },
+                }
+            ]
+        }
+    }

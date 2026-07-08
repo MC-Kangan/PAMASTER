@@ -67,3 +67,20 @@ class NotionPagePayload(BaseModel):
         return {
             "properties": self.to_notion_properties(external_id=external_id),
         }
+
+    def to_notion_paragraph_block(self) -> dict[str, object]:
+        return {
+            "type": "text",
+            "text": {
+                "content": self.body,
+            },
+        }
+
+    def to_notion_block_update_body(self) -> dict[str, object]:
+        return {
+            "paragraph": {
+                "rich_text": [
+                    self.to_notion_paragraph_block(),
+                ]
+            }
+        }

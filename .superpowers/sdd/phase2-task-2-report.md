@@ -91,3 +91,30 @@ Covered behaviors:
 ## Updated issues or concerns
 
 - The live upsert path now performs the required lookup and patch flow, but it still assumes the target database schema exposes `Name` and `External ID` with the expected Notion property types.
+
+## Review follow-up fix 2
+
+- Extended `LiveNotionClient.upsert_page` so the update path converges the full `NotionPagePayload`, including the single-paragraph `body`.
+- Kept the existing query/create/patch page-property flow intact.
+- Added narrow body synchronization for existing pages by:
+  - reading the current page children
+  - locating the first paragraph block
+  - updating that paragraph block only when its current text differs from `payload.body`
+- Left scope intentionally tight to the current model of `payload.body` as a single paragraph.
+
+## Additional TDD Evidence For Review Fix 2
+
+1. Added a new failing test first in `backend/tests/unit/test_live_notion_client.py`:
+   - `test_live_notion_client_updates_existing_page_body_content`
+2. Ran the focused suite before changing production code.
+3. Verified red state:
+   - the body-update test failed because the existing-page path stopped after patching page properties and never touched the paragraph block content
+4. Implemented the minimal code to:
+   - fetch page children for existing pages
+   - compare the first paragraph body to `payload.body`
+   - patch the paragraph block only when the body content changed
+5. Re-ran the same focused suite and verified green: `7 passed`.
+
+## Updated issues or concerns 2
+
+- The live upsert path now converges properties and the first paragraph body block for existing pages, but it still assumes the target Notion page has a paragraph child available for this narrow body-sync flow and that the database schema exposes `Name` and `External ID` with the expected property types.
