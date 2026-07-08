@@ -1,3 +1,6 @@
+from html import escape
+
+
 def portfolio_page() -> str:
     return """
     <html>
@@ -16,7 +19,7 @@ def signal_page(signal_id: str) -> str:
       <head><title>Signal Analysis</title></head>
       <body>
         <h1>Signal Analysis</h1>
-        <p>Signal ID: {signal_id}</p>
+        <p>Signal ID: {escape(signal_id)}</p>
       </body>
     </html>
     """
