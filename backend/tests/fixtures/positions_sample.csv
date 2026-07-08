@@ -1,0 +1,4 @@
+account_id,symbol,name,asset_class,currency,quantity,average_cost,latest_price
+manual-pa,AAPL,Apple Inc.,equity,USD,10,150,175
+manual-pa,SPY,SPDR S&P 500 ETF,etf,USD,5,500,510
+manual-pa,BTC-USD,Bitcoin,crypto,USD,0.25,60000,62000
