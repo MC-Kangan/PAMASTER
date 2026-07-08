@@ -16,14 +16,14 @@ def upgrade() -> None:
         sa.Column("account_id", sa.String(length=64), primary_key=True),
         sa.Column("name", sa.String(length=255), nullable=False),
         sa.Column("source", sa.String(length=64), nullable=False),
-        sa.Column("base_currency", sa.String(length=8), nullable=False),
+        sa.Column("base_currency", sa.String(length=8), nullable=False, server_default="USD"),
     )
     op.create_table(
         "instruments",
         sa.Column("symbol", sa.String(length=64), primary_key=True),
         sa.Column("name", sa.String(length=255), nullable=False),
         sa.Column("asset_class", sa.String(length=32), nullable=False),
-        sa.Column("currency", sa.String(length=8), nullable=False),
+        sa.Column("currency", sa.String(length=8), nullable=False, server_default="USD"),
     )
     op.create_table(
         "positions",

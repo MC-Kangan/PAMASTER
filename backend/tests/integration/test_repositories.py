@@ -30,6 +30,11 @@ def test_repositories_round_trip_account_position_and_price() -> None:
             name="Apple Inc.",
             asset_class=AssetClass.EQUITY,
         )
+        closed_instrument = Instrument(
+            symbol="MSFT",
+            name="Microsoft Corp.",
+            asset_class=AssetClass.EQUITY,
+        )
         position_repo.upsert(
             Position(
                 account_id="acct-1",
@@ -39,11 +44,21 @@ def test_repositories_round_trip_account_position_and_price() -> None:
                 latest_price=Decimal("175"),
             )
         )
+        position_repo.upsert(
+            Position(
+                account_id="acct-1",
+                instrument=closed_instrument,
+                quantity=Decimal("0"),
+                average_cost=Decimal("300"),
+                latest_price=Decimal("0"),
+            )
+        )
+        latest_timestamp = datetime(2026, 7, 8, 12, 30, tzinfo=UTC)
         price_repo.upsert(
             PricePoint(
                 instrument=instrument,
                 price=Decimal("175"),
-                observed_at=datetime(2026, 7, 8, tzinfo=UTC),
+                observed_at=latest_timestamp,
                 provider="manual",
             )
         )
@@ -53,5 +68,7 @@ def test_repositories_round_trip_account_position_and_price() -> None:
         prices = price_repo.latest_prices()
 
     assert len(positions) == 1
+    assert all(position.quantity != 0 for position in positions)
     assert positions[0].instrument.symbol == "AAPL"
     assert prices["AAPL"].price == Decimal("175.000000")
+    assert prices["AAPL"].observed_at == latest_timestamp

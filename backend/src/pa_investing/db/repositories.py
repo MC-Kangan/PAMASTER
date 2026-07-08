@@ -1,4 +1,5 @@
 from collections.abc import Mapping
+from datetime import UTC, datetime
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -21,6 +22,12 @@ def _instrument_from_record(record: InstrumentRecord) -> Instrument:
         asset_class=AssetClass(record.asset_class),
         currency=record.currency,
     )
+
+
+def _normalize_utc_timestamp(value: datetime) -> datetime:
+    if value.tzinfo is None:
+        return value.replace(tzinfo=UTC)
+    return value.astimezone(UTC)
 
 
 class AccountRepository:
@@ -66,6 +73,8 @@ class PositionRepository:
         stmt = select(PositionRecord, InstrumentRecord).join(
             InstrumentRecord,
             PositionRecord.symbol == InstrumentRecord.symbol,
+        ).where(
+            PositionRecord.quantity != 0,
         )
         positions: list[Position] = []
         for position_record, instrument_record in self.session.execute(stmt).all():
@@ -108,14 +117,14 @@ class PriceRepository:
 
         stmt = select(PriceRecord).where(
             PriceRecord.symbol == instrument.symbol,
-            PriceRecord.observed_at == price_point.observed_at,
+            PriceRecord.observed_at == _normalize_utc_timestamp(price_point.observed_at),
             PriceRecord.provider == price_point.provider,
         )
         record = self.session.scalar(stmt)
         if record is None:
             record = PriceRecord(
                 symbol=instrument.symbol,
-                observed_at=price_point.observed_at,
+                observed_at=_normalize_utc_timestamp(price_point.observed_at),
                 provider=price_point.provider,
             )
             self.session.add(record)
@@ -137,7 +146,7 @@ class PriceRepository:
             symbol: PricePoint(
                 instrument=_instrument_from_record(instrument_record),
                 price=price_record.price,
-                observed_at=price_record.observed_at,
+                observed_at=_normalize_utc_timestamp(price_record.observed_at),
                 provider=price_record.provider,
             )
             for symbol, (price_record, instrument_record) in latest.items()
@@ -160,7 +169,7 @@ class SignalRepository:
         record.message = signal.message
         record.deterministic_recommendation = signal.deterministic_recommendation
         record.audit_id = signal.audit_id
-        record.created_at = signal.created_at
+        record.created_at = _normalize_utc_timestamp(signal.created_at)
         record.analytics_path = signal.analytics_path
 
     def list_open(self) -> list[Signal]:
@@ -177,7 +186,7 @@ class SignalRepository:
                 message=row.message,
                 deterministic_recommendation=row.deterministic_recommendation,
                 audit_id=row.audit_id,
-                created_at=row.created_at,
+                created_at=_normalize_utc_timestamp(row.created_at),
                 analytics_path=row.analytics_path,
             )
             for row in rows

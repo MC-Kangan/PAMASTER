@@ -1,10 +1,29 @@
-from datetime import datetime
+from datetime import UTC, datetime
 from decimal import Decimal
 
-from sqlalchemy import DateTime, ForeignKey, Numeric, String, UniqueConstraint
+from sqlalchemy import DateTime, ForeignKey, Numeric, String, TypeDecorator, UniqueConstraint, text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from pa_investing.db.base import Base
+
+
+class UTCDateTime(TypeDecorator[datetime]):
+    impl = DateTime(timezone=True)
+    cache_ok = True
+
+    def process_bind_param(self, value: datetime | None, dialect: object) -> datetime | None:
+        if value is None:
+            return None
+        if value.tzinfo is None:
+            return value.replace(tzinfo=UTC)
+        return value.astimezone(UTC)
+
+    def process_result_value(self, value: datetime | None, dialect: object) -> datetime | None:
+        if value is None:
+            return None
+        if value.tzinfo is None:
+            return value.replace(tzinfo=UTC)
+        return value.astimezone(UTC)
 
 
 class AccountRecord(Base):
@@ -13,7 +32,12 @@ class AccountRecord(Base):
     account_id: Mapped[str] = mapped_column(String(64), primary_key=True)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     source: Mapped[str] = mapped_column(String(64), nullable=False)
-    base_currency: Mapped[str] = mapped_column(String(8), nullable=False, default="USD")
+    base_currency: Mapped[str] = mapped_column(
+        String(8),
+        nullable=False,
+        default="USD",
+        server_default=text("'USD'"),
+    )
 
 
 class InstrumentRecord(Base):
@@ -22,7 +46,12 @@ class InstrumentRecord(Base):
     symbol: Mapped[str] = mapped_column(String(64), primary_key=True)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     asset_class: Mapped[str] = mapped_column(String(32), nullable=False)
-    currency: Mapped[str] = mapped_column(String(8), nullable=False, default="USD")
+    currency: Mapped[str] = mapped_column(
+        String(8),
+        nullable=False,
+        default="USD",
+        server_default=text("'USD'"),
+    )
 
 
 class PositionRecord(Base):
@@ -46,7 +75,7 @@ class PriceRecord(Base):
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     symbol: Mapped[str] = mapped_column(ForeignKey("instruments.symbol"), nullable=False)
     price: Mapped[Decimal] = mapped_column(Numeric(24, 8), nullable=False)
-    observed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    observed_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)
     provider: Mapped[str] = mapped_column(String(64), nullable=False)
 
 
@@ -61,5 +90,5 @@ class SignalRecord(Base):
     message: Mapped[str] = mapped_column(String(1024), nullable=False)
     deterministic_recommendation: Mapped[str] = mapped_column(String(1024), nullable=False)
     audit_id: Mapped[str] = mapped_column(String(64), nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)
     analytics_path: Mapped[str | None] = mapped_column(String(512), nullable=True)
