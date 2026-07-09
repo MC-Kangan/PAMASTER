@@ -63,9 +63,17 @@ class NotionSync:
             body="\n".join(summary_lines),
         )
 
-    def sync_daily_review(self, result: DailyReviewResult) -> str:
+    def sync_daily_review(
+        self,
+        result: DailyReviewResult,
+        external_id: str | None = None,
+    ) -> str:
         payload = self.build_daily_review_payload(result)
-        return self.client.upsert_page("Daily Review", result.snapshot.snapshot_id, payload)
+        return self.client.upsert_page(
+            "Daily Review",
+            external_id or result.snapshot.snapshot_id,
+            payload,
+        )
 
     @staticmethod
     def _format_decimal(value: Decimal) -> str:
