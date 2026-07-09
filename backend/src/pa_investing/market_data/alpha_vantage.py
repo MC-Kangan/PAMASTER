@@ -8,7 +8,6 @@ from pa_investing.domain.models import Instrument, PricePoint
 from pa_investing.market_data.interfaces import MarketDataProvider
 
 ALPHA_VANTAGE_URL = "https://www.alphavantage.co/query"
-EQUITY_QUOTE_CURRENCY = "USD"
 PROVIDER_NAME = "alpha_vantage"
 
 
@@ -46,6 +45,9 @@ class AlphaVantageProvider(MarketDataProvider):
         client: httpx.Client,
         symbol: str,
     ) -> PricePoint | None:
+        if self.base_currency != "USD":
+            return None
+
         response = client.get(
             ALPHA_VANTAGE_URL,
             params=[
@@ -72,7 +74,7 @@ class AlphaVantageProvider(MarketDataProvider):
             symbol=symbol,
             name=symbol,
             asset_class=AssetClass.EQUITY,
-            currency=EQUITY_QUOTE_CURRENCY,
+            currency=self.base_currency,
         )
         try:
             observed_at = datetime.fromisoformat(latest_trading_day).replace(tzinfo=UTC)

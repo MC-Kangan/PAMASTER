@@ -133,7 +133,7 @@ def test_alpha_vantage_provider_skips_malformed_crypto_payload_without_aborting_
     assert "BTC-USD" not in prices
 
 
-def test_alpha_vantage_provider_keeps_equity_quote_currency_truthful() -> None:
+def test_alpha_vantage_provider_skips_equity_quote_when_base_currency_is_non_usd() -> None:
     fixture_path = (
         Path(__file__).resolve().parents[1]
         / "fixtures"
@@ -152,4 +152,4 @@ def test_alpha_vantage_provider_keeps_equity_quote_currency_truthful() -> None:
 
     prices = provider.get_latest_prices({"AAPL"})
 
-    assert prices["AAPL"].instrument.currency == "USD"
+    assert prices == {}
