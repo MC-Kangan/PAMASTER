@@ -38,5 +38,13 @@ class RefreshAndSyncWorkflow:
             positions=positions,
             stop_prices=stop_prices,
         )
-        self.notion_sync.sync_daily_review(result)
+        self.notion_sync.sync_daily_review(
+            result,
+            external_id=self._daily_review_external_id(result),
+        )
         return result
+
+    @staticmethod
+    def _daily_review_external_id(result: DailyReviewResult) -> str:
+        snapshot_date = result.snapshot.observed_at.date().isoformat()
+        return f"daily-review:{snapshot_date}:default"

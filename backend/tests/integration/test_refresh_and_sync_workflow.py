@@ -57,7 +57,7 @@ def test_refresh_and_sync_workflow_updates_prices_and_syncs_notion() -> None:
                 instrument=instrument,
                 quantity=Decimal("10"),
                 average_cost=Decimal("150"),
-                latest_price=Decimal("175"),
+                latest_price=Decimal("150"),
             )
         )
         session.commit()
@@ -87,19 +87,31 @@ def test_refresh_and_sync_workflow_updates_prices_and_syncs_notion() -> None:
         )
 
         result = workflow.run(stop_prices={"AAPL": Decimal("180")})
+        second_result = workflow.run(stop_prices={"AAPL": Decimal("180")})
         session.commit()
 
         latest_prices = price_repository.latest_prices()
+        stored_positions = position_repository.list_open_positions()
         stored_snapshot_ids = session.scalars(
             select(PortfolioSnapshotRecord.snapshot_id)
         ).all()
         stored_signal_ids = session.scalars(select(SignalRecord.signal_id)).all()
 
     assert result.snapshot.nav == Decimal("1750")
+    assert second_result.snapshot.nav == Decimal("1750")
     assert len(result.signals) == 1
     assert latest_prices["AAPL"].provider == "alpha_vantage"
     assert latest_prices["AAPL"].price == Decimal("175.000000")
-    assert stored_snapshot_ids == [result.snapshot.snapshot_id]
-    assert stored_signal_ids == [result.signals[0].signal_id]
+    assert stored_positions[0].latest_price == Decimal("175.000000")
+    assert set(stored_snapshot_ids) == {
+        result.snapshot.snapshot_id,
+        second_result.snapshot.snapshot_id,
+    }
+    assert set(stored_signal_ids) == {
+        result.signals[0].signal_id,
+        second_result.signals[0].signal_id,
+    }
     assert next(iter(notion_client.pages["Signals"])) == result.signals[0].signal_id
-    assert notion_client.pages["Daily Review"][result.snapshot.snapshot_id].properties["NAV"] == "1750"
+    daily_review_external_id = f"daily-review:{result.snapshot.observed_at.date().isoformat()}:default"
+    assert list(notion_client.pages["Daily Review"]) == [daily_review_external_id]
+    assert notion_client.pages["Daily Review"][daily_review_external_id].properties["NAV"] == "1750"
