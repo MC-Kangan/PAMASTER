@@ -9,7 +9,11 @@ from pa_investing.notion.schemas import NotionPagePayload
 
 def test_live_notion_client_upserts_page_to_configured_database() -> None:
     captured: dict[str, object] = {}
-    fixture_path = Path(__file__).resolve().parents[1] / "fixtures" / "notion_create_page_response.json"
+    fixture_path = (
+        Path(__file__).resolve().parents[1]
+        / "fixtures"
+        / "notion_create_page_response.json"
+    )
     response_body = json.loads(fixture_path.read_text())
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -40,10 +44,19 @@ def test_live_notion_client_upserts_page_to_configured_database() -> None:
 
     request_body = captured["json"]
     assert request_body["parent"] == {"database_id": "signals-db"}
-    assert request_body["properties"]["Name"]["title"][0]["text"]["content"] == "AAPL stop_reference"
+    assert (
+        request_body["properties"]["Name"]["title"][0]["text"]["content"]
+        == "AAPL stop_reference"
+    )
     assert request_body["properties"]["Symbol"]["rich_text"][0]["text"]["content"] == "AAPL"
-    assert request_body["properties"]["External ID"]["rich_text"][0]["text"]["content"] == "sig-1"
-    assert request_body["children"][0]["paragraph"]["rich_text"][0]["text"]["content"] == "Signal body"
+    assert (
+        request_body["properties"]["External ID"]["rich_text"][0]["text"]["content"]
+        == "sig-1"
+    )
+    assert (
+        request_body["children"][0]["paragraph"]["rich_text"][0]["text"]["content"]
+        == "Signal body"
+    )
 
 
 def test_live_notion_client_updates_existing_page_when_external_id_matches() -> None:
@@ -118,8 +131,14 @@ def test_live_notion_client_updates_existing_page_when_external_id_matches() -> 
         }
     }
     assert requests[1][1] == "https://api.notion.com/v1/pages/notion-page-1"
-    assert requests[1][2]["properties"]["Name"]["title"][0]["text"]["content"] == "AAPL stop_reference"
-    assert requests[1][2]["properties"]["External ID"]["rich_text"][0]["text"]["content"] == "sig-1"
+    assert (
+        requests[1][2]["properties"]["Name"]["title"][0]["text"]["content"]
+        == "AAPL stop_reference"
+    )
+    assert (
+        requests[1][2]["properties"]["External ID"]["rich_text"][0]["text"]["content"]
+        == "sig-1"
+    )
 
 
 def test_live_notion_client_repeated_upsert_is_idempotent() -> None:

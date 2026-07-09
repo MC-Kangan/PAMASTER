@@ -112,6 +112,11 @@ def test_refresh_and_sync_workflow_updates_prices_and_syncs_notion() -> None:
         second_result.signals[0].signal_id,
     }
     assert next(iter(notion_client.pages["Signals"])) == result.signals[0].signal_id
-    daily_review_external_id = f"daily-review:{result.snapshot.observed_at.date().isoformat()}:default"
+    daily_review_external_id = (
+        f"daily-review:{result.snapshot.observed_at.date().isoformat()}:default"
+    )
     assert list(notion_client.pages["Daily Review"]) == [daily_review_external_id]
-    assert notion_client.pages["Daily Review"][daily_review_external_id].properties["NAV"] == "1750"
+    assert (
+        notion_client.pages["Daily Review"][daily_review_external_id].properties["NAV"]
+        == "1750"
+    )

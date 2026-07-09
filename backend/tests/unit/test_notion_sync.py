@@ -1,8 +1,8 @@
 from datetime import UTC, datetime
 from decimal import Decimal
 
-from pa_investing.domain.enums import AssetClass, SignalSeverity, SignalStatus, SignalType
-from pa_investing.domain.models import Instrument, PortfolioSnapshot, Position, Signal
+from pa_investing.domain.enums import SignalSeverity, SignalStatus, SignalType
+from pa_investing.domain.models import PortfolioSnapshot, Signal
 from pa_investing.notion.client import FakeNotionClient
 from pa_investing.notion.sync import NotionSync
 from pa_investing.workflows.agent_api import DailyReviewResult
@@ -34,17 +34,6 @@ def test_notion_sync_writes_signal_payload_to_fake_client() -> None:
 
 
 def test_notion_sync_builds_daily_review_payload() -> None:
-    position = Position(
-        account_id="manual-pa",
-        instrument=Instrument(
-            symbol="AAPL",
-            name="Apple Inc.",
-            asset_class=AssetClass.EQUITY,
-        ),
-        quantity=Decimal("100"),
-        average_cost=Decimal("100"),
-        latest_price=Decimal("90"),
-    )
     result = DailyReviewResult(
         snapshot=PortfolioSnapshot(
             snapshot_id="snap-1",
