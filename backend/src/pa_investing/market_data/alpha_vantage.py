@@ -1,5 +1,5 @@
 from datetime import UTC, datetime
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 
 import httpx
 
@@ -8,6 +8,7 @@ from pa_investing.domain.models import Instrument, PricePoint
 from pa_investing.market_data.interfaces import MarketDataProvider
 
 ALPHA_VANTAGE_URL = "https://www.alphavantage.co/query"
+EQUITY_QUOTE_CURRENCY = "USD"
 PROVIDER_NAME = "alpha_vantage"
 
 
@@ -71,15 +72,19 @@ class AlphaVantageProvider(MarketDataProvider):
             symbol=symbol,
             name=symbol,
             asset_class=AssetClass.EQUITY,
-            currency=self.base_currency,
+            currency=EQUITY_QUOTE_CURRENCY,
         )
-        observed_at = datetime.fromisoformat(latest_trading_day).replace(tzinfo=UTC)
-        return PricePoint(
-            instrument=instrument,
-            price=Decimal(price),
-            observed_at=observed_at,
-            provider=PROVIDER_NAME,
-        )
+        try:
+            observed_at = datetime.fromisoformat(latest_trading_day).replace(tzinfo=UTC)
+            parsed_price = Decimal(price)
+            return PricePoint(
+                instrument=instrument,
+                price=parsed_price,
+                observed_at=observed_at,
+                provider=PROVIDER_NAME,
+            )
+        except (InvalidOperation, ValueError):
+            return None
 
     def _get_crypto_price(
         self,
@@ -116,10 +121,14 @@ class AlphaVantageProvider(MarketDataProvider):
             asset_class=AssetClass.CRYPTO,
             currency=to_currency,
         )
-        observed_at = datetime.fromisoformat(last_refreshed).replace(tzinfo=UTC)
-        return PricePoint(
-            instrument=instrument,
-            price=Decimal(price),
-            observed_at=observed_at,
-            provider=PROVIDER_NAME,
-        )
+        try:
+            observed_at = datetime.fromisoformat(last_refreshed).replace(tzinfo=UTC)
+            parsed_price = Decimal(price)
+            return PricePoint(
+                instrument=instrument,
+                price=parsed_price,
+                observed_at=observed_at,
+                provider=PROVIDER_NAME,
+            )
+        except (InvalidOperation, ValueError):
+            return None
