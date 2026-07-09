@@ -84,49 +84,47 @@ Completed so far:
 - Notion sync was expanded to support:
   - `Signals`
   - `Daily Review`
-
-Phase 2 work currently underway:
-
-- Alpha Vantage price provider implementation has been added and then hardened through review-driven fixes.
-- At the time of this README, that adapter work exists on the branch, but the task review loop was still in progress when this summary was written.
+- Alpha Vantage price provider was implemented and hardened through review-driven fixes.
+- the refresh-and-sync workflow was implemented:
+  - load open positions;
+  - fetch current prices;
+  - persist price points;
+  - update position marks;
+  - compute and persist snapshot and signals;
+  - sync `Signals` and `Daily Review` into Notion
+- a first API trigger surface was added:
+  - `POST /workflows/refresh-and-sync`
+- backend runbook documentation was expanded for:
+  - live Notion configuration
+  - Alpha Vantage configuration
+  - migrations
+  - API triggering
+  - safe local runs with Notion disabled
 
 ## What Still Needs To Be Done For The First MVP
 
 To reach the first MVP where you can see fictitious positions in a real Notion workspace, the remaining work is:
 
-1. Finish and approve the live market price provider task.
-   This includes the final review gate for the Alpha Vantage adapter.
-
-2. Build the refresh-and-sync workflow.
-   This workflow should:
-   - load persisted positions;
-   - refresh prices from the live provider;
-   - persist the refreshed prices;
-   - recompute portfolio metrics and signals;
-   - persist snapshots and signals;
-   - sync `Signals` and `Daily Review` into Notion.
-
-3. Add an API trigger route for the workflow.
-   Planned route:
-   - `POST /workflows/refresh-and-sync`
-
-4. Prepare a demo dataset of fictitious positions.
+1. Prepare a demo dataset of fictitious positions.
    For the first MVP, this can be simple seeded positions such as:
    - `AAPL`
    - `SPY`
    - `BTC-USD`
 
-5. Configure a real Notion workspace for the demo.
+2. Configure a real Notion workspace for the demo.
    At minimum, the backend needs working database IDs for:
    - `Signals`
    - `Daily Review`
 
-6. Run the workflow end to end against the fictitious data.
+3. Run the workflow end to end against the fictitious data.
    The successful MVP outcome is:
    - positions exist in the backend database;
    - live or simulated current prices refresh;
    - portfolio snapshot and signals are generated;
    - Notion shows the synced results without manual page editing.
+
+4. Optionally add a tiny seed/import helper for repeatable demos.
+   This is not strictly required, but it would make the MVP much easier to rerun.
 
 ## Definition Of The First MVP
 
@@ -153,12 +151,10 @@ It does not yet require:
 
 To get the first MVP in front of you as quickly as possible, the next order should be:
 
-1. finish Phase 2 Task 3 review for Alpha Vantage;
-2. build the refresh-and-sync workflow;
-3. add the API trigger route;
-4. seed fictitious positions in the database;
-5. connect the backend to your real Notion databases;
-6. run the demo loop and verify the Notion output visually.
+1. seed fictitious positions in the database;
+2. connect the backend to your real Notion databases;
+3. run the demo loop and verify the Notion output visually;
+4. add a repeatable seed/import helper if the manual setup feels too fiddly.
 
 ## Important Boundaries
 
