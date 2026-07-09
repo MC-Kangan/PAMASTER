@@ -133,6 +133,69 @@ def test_alpha_vantage_provider_skips_malformed_crypto_payload_without_aborting_
     assert "BTC-USD" not in prices
 
 
+def test_alpha_vantage_provider_skips_incomplete_equity_payload_without_aborting_batch() -> None:
+    bad_equity_payload = {
+        "Global Quote": {
+            "01. symbol": "AAPL",
+            "07. latest trading day": "2026-07-07",
+        }
+    }
+    fixture_path = (
+        Path(__file__).resolve().parents[1] / "fixtures" / "alpha_vantage_btc_usd.json"
+    )
+    good_crypto_payload = json.loads(fixture_path.read_text())
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if "function=GLOBAL_QUOTE" in str(request.url):
+            return httpx.Response(200, json=bad_equity_payload)
+        if "function=CURRENCY_EXCHANGE_RATE" in str(request.url):
+            return httpx.Response(200, json=good_crypto_payload)
+        raise AssertionError(f"Unexpected request: {request.url}")
+
+    provider = AlphaVantageProvider(
+        api_key="demo",
+        transport=httpx.MockTransport(handler),
+    )
+
+    prices = provider.get_latest_prices({"AAPL", "BTC-USD"})
+
+    assert "AAPL" not in prices
+    assert prices["BTC-USD"].price == Decimal("65000.00")
+
+
+def test_alpha_vantage_provider_skips_incomplete_crypto_payload_without_aborting_batch() -> None:
+    fixture_path = (
+        Path(__file__).resolve().parents[1]
+        / "fixtures"
+        / "alpha_vantage_global_quote_aapl.json"
+    )
+    good_equity_payload = json.loads(fixture_path.read_text())
+    bad_crypto_payload = {
+        "Realtime Currency Exchange Rate": {
+            "1. From_Currency Code": "BTC",
+            "3. To_Currency Code": "USD",
+            "6. Last Refreshed": "2026-07-07 20:00:00",
+        }
+    }
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if "function=GLOBAL_QUOTE" in str(request.url):
+            return httpx.Response(200, json=good_equity_payload)
+        if "function=CURRENCY_EXCHANGE_RATE" in str(request.url):
+            return httpx.Response(200, json=bad_crypto_payload)
+        raise AssertionError(f"Unexpected request: {request.url}")
+
+    provider = AlphaVantageProvider(
+        api_key="demo",
+        transport=httpx.MockTransport(handler),
+    )
+
+    prices = provider.get_latest_prices({"AAPL", "BTC-USD"})
+
+    assert prices["AAPL"].price == Decimal("210.55")
+    assert "BTC-USD" not in prices
+
+
 def test_alpha_vantage_provider_skips_equity_quote_when_base_currency_is_non_usd() -> None:
     fixture_path = (
         Path(__file__).resolve().parents[1]
