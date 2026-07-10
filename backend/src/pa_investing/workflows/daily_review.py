@@ -50,10 +50,16 @@ class DailyReviewWorkflow:
         self,
         positions: list[Position],
         stop_prices: dict[str, Decimal],
+        *,
+        sync_signals: bool = True,
     ) -> DailyReviewResult:
         result = self.agent_api.run_daily_review(positions=positions, stop_prices=stop_prices)
         if self.persistence is not None:
             self.persistence.persist(result)
+        if sync_signals:
+            self.sync_signals(result)
+        return result
+
+    def sync_signals(self, result: DailyReviewResult) -> None:
         for signal in result.signals:
             self.notion_sync.sync_signal(signal)
-        return result

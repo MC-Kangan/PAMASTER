@@ -18,3 +18,4 @@ class Settings(BaseSettings):
     analytics_auth_enabled: bool = False
     analytics_auth_username: str = ""
     analytics_auth_password: str = ""
+    workflow_api_token: str = ""

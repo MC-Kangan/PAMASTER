@@ -8,6 +8,7 @@ def test_settings_defaults_are_safe_for_local_tests() -> None:
     assert settings.notion_enabled is False
     assert settings.llm_provider == "mock"
     assert settings.database_url.startswith("sqlite+pysqlite://")
+    assert settings.workflow_api_token == ""
 
 
 def test_settings_include_live_notion_and_market_data_fields() -> None:

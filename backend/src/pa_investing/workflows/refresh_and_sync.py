@@ -1,3 +1,4 @@
+from collections.abc import Callable
 from decimal import Decimal
 
 from pa_investing.db.repositories import PositionRepository, PriceRepository
@@ -15,12 +16,14 @@ class RefreshAndSyncWorkflow:
         market_data_provider: MarketDataProvider,
         daily_review_workflow: DailyReviewWorkflow,
         notion_sync: NotionSync,
+        commit: Callable[[], None],
     ) -> None:
         self.position_repository = position_repository
         self.price_repository = price_repository
         self.market_data_provider = market_data_provider
         self.daily_review_workflow = daily_review_workflow
         self.notion_sync = notion_sync
+        self.commit = commit
 
     def run(self, stop_prices: dict[str, Decimal]) -> DailyReviewResult:
         positions = self.position_repository.list_open_positions()
@@ -37,7 +40,10 @@ class RefreshAndSyncWorkflow:
         result = self.daily_review_workflow.run(
             positions=positions,
             stop_prices=stop_prices,
+            sync_signals=False,
         )
+        self.commit()
+        self.daily_review_workflow.sync_signals(result)
         self.notion_sync.sync_daily_review(
             result,
             external_id=self._daily_review_external_id(result),

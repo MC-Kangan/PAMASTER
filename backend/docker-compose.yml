@@ -5,20 +5,29 @@ services:
       POSTGRES_USER: pa_investing
       POSTGRES_PASSWORD: pa_investing
       POSTGRES_DB: pa_investing
-    ports:
-      - "5432:5432"
     volumes:
       - pa_postgres_data:/var/lib/postgresql/data
 
   backend-api:
     build: .
     environment:
-      PA_ENVIRONMENT: local
+      PA_ENVIRONMENT: "${PA_ENVIRONMENT:-local}"
       PA_DATABASE_URL: postgresql+psycopg://pa_investing:pa_investing@postgres:5432/pa_investing
-      PA_NOTION_ENABLED: "false"
-      PA_LLM_PROVIDER: mock
+      PA_NOTION_ENABLED: "${PA_NOTION_ENABLED:-false}"
+      PA_NOTION_API_KEY: "${PA_NOTION_API_KEY:-}"
+      PA_NOTION_SIGNALS_DATABASE_ID: "${PA_NOTION_SIGNALS_DATABASE_ID:-}"
+      PA_NOTION_DAILY_REVIEW_DATABASE_ID: "${PA_NOTION_DAILY_REVIEW_DATABASE_ID:-}"
+      PA_MARKET_DATA_PROVIDER: "${PA_MARKET_DATA_PROVIDER:-manual}"
+      PA_ALPHA_VANTAGE_API_KEY: "${PA_ALPHA_VANTAGE_API_KEY:-}"
+      PA_ANALYTICS_AUTH_ENABLED: "${PA_ANALYTICS_AUTH_ENABLED:-true}"
+      PA_ANALYTICS_AUTH_USERNAME: "${PA_ANALYTICS_AUTH_USERNAME:-}"
+      PA_ANALYTICS_AUTH_PASSWORD: "${PA_ANALYTICS_AUTH_PASSWORD:-}"
+      PA_WORKFLOW_API_TOKEN: "${PA_WORKFLOW_API_TOKEN:-}"
+      PA_LLM_PROVIDER: "${PA_LLM_PROVIDER:-mock}"
+      PA_OPENAI_API_KEY: "${PA_OPENAI_API_KEY:-}"
+      PA_DEFAULT_BASE_CURRENCY: "${PA_DEFAULT_BASE_CURRENCY:-USD}"
     ports:
-      - "8000:8000"
+      - "${PA_BIND_ADDRESS:-127.0.0.1}:8000:8000"
     depends_on:
       - postgres
 

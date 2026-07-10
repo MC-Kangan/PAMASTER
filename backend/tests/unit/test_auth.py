@@ -42,3 +42,17 @@ def test_verify_analytics_credentials_returns_true_when_auth_disabled() -> None:
         username="anything",
         password="anything",
     )
+
+
+def test_verify_analytics_credentials_rejects_blank_configured_credentials() -> None:
+    settings = Settings(
+        analytics_auth_enabled=True,
+        analytics_auth_username="",
+        analytics_auth_password="",
+    )
+
+    assert not verify_analytics_credentials(
+        settings=settings,
+        username="",
+        password="",
+    )

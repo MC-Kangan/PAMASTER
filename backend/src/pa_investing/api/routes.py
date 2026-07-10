@@ -6,7 +6,7 @@ from fastapi.responses import HTMLResponse
 
 from pa_investing.analytics.performance import build_performance_history
 from pa_investing.analytics_app.pages import portfolio_page, signal_page
-from pa_investing.api.auth import require_analytics_auth
+from pa_investing.api.auth import require_analytics_auth, require_workflow_auth
 from pa_investing.api.schemas import (
     PerformanceHistoryResponse,
     PerformancePointResponse,
@@ -79,6 +79,7 @@ def performance_analysis(
 @router.post("/workflows/refresh-and-sync", response_model=RefreshAndSyncResponse)
 def refresh_and_sync_route(
     payload: RefreshAndSyncRequest,
+    _workflow_auth: Annotated[None, Depends(require_workflow_auth)],
     workflow: Annotated[
         RefreshAndSyncWorkflow,
         Depends(get_refresh_and_sync_workflow),

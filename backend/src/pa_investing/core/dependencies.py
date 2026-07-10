@@ -78,6 +78,7 @@ def get_refresh_and_sync_workflow(
                 ),
             ),
             notion_sync=notion_sync,
+            commit=session.commit,
         )
 
 
