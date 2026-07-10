@@ -65,6 +65,24 @@ Expected response:
 {"status":"ok"}
 ```
 
+## Demo Portfolio Seed
+
+To load the first MVP demo portfolio into PostgreSQL:
+
+```bash
+python -m pa_investing.scripts.seed_demo_portfolio
+```
+
+The seeded account is `pa-demo` and the starter symbols are:
+
+- `SPGI`
+- `ASML`
+- `SAP`
+- `SGLN`
+- `SMH`
+
+The CSV-backed seed fixture includes placeholder `latest_price` values so the portfolio is complete immediately after loading. Those are only starting marks. The refresh workflow is expected to replace them with provider prices where supported.
+
 ## Refresh-And-Sync Workflow Trigger
 
 The first MVP trigger surface is:
@@ -78,7 +96,7 @@ Example:
 ```bash
 curl -X POST http://localhost:8000/workflows/refresh-and-sync \
   -H "Content-Type: application/json" \
-  -d '{"stop_prices": {"AAPL": "180"}}'
+  -d '{"stop_prices": {"SPGI": "470", "ASML": "900", "SAP": "240", "SGLN": "22", "SMH": "250"}}'
 ```
 
 Example response:
@@ -91,6 +109,19 @@ Example response:
   "notion_sync_enabled": true
 }
 ```
+
+For the first visible MVP loop, the intended sequence is:
+
+```bash
+alembic upgrade head
+python -m pa_investing.scripts.seed_demo_portfolio
+uvicorn pa_investing.main:app --reload
+curl -X POST http://localhost:8000/workflows/refresh-and-sync \
+  -H "Content-Type: application/json" \
+  -d '{"stop_prices": {"SPGI": "470", "ASML": "900", "SAP": "240", "SGLN": "22", "SMH": "250"}}'
+```
+
+After the workflow runs, inspect Notion `Signals` and `Daily Review`.
 
 ## Docker
 

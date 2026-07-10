@@ -1,0 +1,6 @@
+account_id,symbol,name,asset_class,currency,quantity,average_cost,latest_price
+pa-demo,SPGI,S&P Global Inc.,equity,USD,12,455,468
+pa-demo,ASML,ASML Holding N.V.,equity,EUR,6,890,905
+pa-demo,SAP,SAP SE,equity,EUR,15,235,242
+pa-demo,SGLN,iShares Physical Gold ETC,etf,GBP,120,21.5,22.1
+pa-demo,SMH,VanEck Semiconductor UCITS ETF,etf,USD,20,248,252

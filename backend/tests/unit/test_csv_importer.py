@@ -29,3 +29,27 @@ def test_csv_position_importer_rejects_missing_columns(tmp_path: Path) -> None:
         assert "missing required columns" in str(exc)
     else:
         raise AssertionError("CsvPositionImporter accepted a malformed file")
+
+
+def test_csv_position_importer_maps_demo_portfolio_fixture() -> None:
+    importer = CsvPositionImporter()
+
+    positions = importer.import_positions(
+        Path("tests/fixtures/positions_demo_portfolio.csv")
+    )
+
+    assert [position.account_id for position in positions] == ["pa-demo"] * 5
+    assert [position.instrument.symbol for position in positions] == [
+        "SPGI",
+        "ASML",
+        "SAP",
+        "SGLN",
+        "SMH",
+    ]
+    assert [position.instrument.asset_class for position in positions] == [
+        AssetClass.EQUITY,
+        AssetClass.EQUITY,
+        AssetClass.EQUITY,
+        AssetClass.ETF,
+        AssetClass.ETF,
+    ]
