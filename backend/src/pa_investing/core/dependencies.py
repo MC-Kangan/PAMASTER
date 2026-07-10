@@ -79,3 +79,9 @@ def get_refresh_and_sync_workflow(
             ),
             notion_sync=notion_sync,
         )
+
+
+def get_portfolio_snapshot_repository() -> Iterator[PortfolioSnapshotRepository]:
+    session_factory = get_database_session_factory()
+    with session_factory.session() as session:
+        yield PortfolioSnapshotRepository(session)

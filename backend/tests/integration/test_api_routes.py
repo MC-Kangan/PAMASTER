@@ -3,6 +3,7 @@ from decimal import Decimal
 
 from fastapi.testclient import TestClient
 
+from pa_investing.core.config import Settings
 from pa_investing.core.dependencies import get_refresh_and_sync_workflow
 from pa_investing.domain.enums import SignalSeverity, SignalStatus, SignalType
 from pa_investing.domain.models import PortfolioSnapshot, Signal
@@ -95,3 +96,141 @@ def test_refresh_and_sync_route_returns_summary() -> None:
         "signal_count": 1,
         "notion_sync_enabled": False,
     }
+
+
+def test_performance_route_returns_history_summary_and_points() -> None:
+    app = create_app()
+
+    class FakePortfolioSnapshotRepository:
+        def list_history(self, days: int | None = None) -> list[PortfolioSnapshot]:
+            assert days == 30
+            return [
+                PortfolioSnapshot(
+                    snapshot_id="snap-1",
+                    observed_at=datetime(2026, 7, 9, 0, 0, tzinfo=UTC),
+                    base_currency="USD",
+                    nav=Decimal("1000"),
+                    gross_exposure=Decimal("1000"),
+                    net_exposure=Decimal("1000"),
+                    unrealized_pnl=Decimal("0"),
+                ),
+                PortfolioSnapshot(
+                    snapshot_id="snap-2",
+                    observed_at=datetime(2026, 7, 10, 0, 0, tzinfo=UTC),
+                    base_currency="USD",
+                    nav=Decimal("1100"),
+                    gross_exposure=Decimal("1100"),
+                    net_exposure=Decimal("1100"),
+                    unrealized_pnl=Decimal("100"),
+                ),
+            ]
+
+    from pa_investing.core.dependencies import get_portfolio_snapshot_repository
+
+    app.dependency_overrides[get_portfolio_snapshot_repository] = (
+        lambda: FakePortfolioSnapshotRepository()
+    )
+    client = TestClient(app)
+
+    response = client.get("/analysis/performance?days=30")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "start_observed_at": "2026-07-09T00:00:00Z",
+        "end_observed_at": "2026-07-10T00:00:00Z",
+        "starting_nav": "1000",
+        "ending_nav": "1100",
+        "simple_return": "0.1",
+        "max_drawdown": "0",
+        "points": [
+            {
+                "observed_at": "2026-07-09T00:00:00Z",
+                "nav": "1000",
+                "unrealized_pnl": "0",
+                "peak_nav": "1000",
+                "drawdown": "0",
+                "simple_return": "0",
+            },
+            {
+                "observed_at": "2026-07-10T00:00:00Z",
+                "nav": "1100",
+                "unrealized_pnl": "100",
+                "peak_nav": "1100",
+                "drawdown": "0",
+                "simple_return": "0.1",
+            },
+        ],
+    }
+
+
+def test_performance_route_returns_empty_series_when_no_history_exists() -> None:
+    app = create_app()
+
+    class FakePortfolioSnapshotRepository:
+        def list_history(self, days: int | None = None) -> list[PortfolioSnapshot]:
+            assert days is None
+            return []
+
+    from pa_investing.core.dependencies import get_portfolio_snapshot_repository
+
+    app.dependency_overrides[get_portfolio_snapshot_repository] = (
+        lambda: FakePortfolioSnapshotRepository()
+    )
+    client = TestClient(app)
+
+    response = client.get("/analysis/performance")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "start_observed_at": None,
+        "end_observed_at": None,
+        "starting_nav": None,
+        "ending_nav": None,
+        "simple_return": None,
+        "max_drawdown": None,
+        "points": [],
+    }
+
+
+def test_browser_analytics_route_denies_unauthenticated_requests() -> None:
+    app = create_app()
+    from pa_investing.core.dependencies import get_settings
+
+    app.dependency_overrides[get_settings] = lambda: Settings(
+        analytics_auth_enabled=True,
+        analytics_auth_username="demo",
+        analytics_auth_password="secret",
+    )
+    client = TestClient(app)
+
+    response = client.get("/analysis/portfolio")
+
+    assert response.status_code == 401
+
+
+def test_browser_analytics_route_allows_authenticated_requests() -> None:
+    app = create_app()
+    from pa_investing.core.dependencies import get_settings
+
+    app.dependency_overrides[get_settings] = lambda: Settings(
+        analytics_auth_enabled=True,
+        analytics_auth_username="demo",
+        analytics_auth_password="secret",
+    )
+    client = TestClient(app)
+
+    response = client.get("/analysis/portfolio", auth=("demo", "secret"))
+
+    assert response.status_code == 200
+    assert "Portfolio Analysis" in response.text
+
+
+def test_performance_analysis_page_renders() -> None:
+    client = TestClient(create_app())
+
+    response = client.get("/analysis/portfolio")
+
+    assert response.status_code == 200
+    assert "Performance History" in response.text
+    assert "Window Return" in response.text
+    assert 'id="performance-history"' in response.text

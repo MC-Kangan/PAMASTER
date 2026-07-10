@@ -15,3 +15,6 @@ class Settings(BaseSettings):
     llm_provider: str = "mock"
     openai_api_key: str = ""
     default_base_currency: str = "USD"
+    analytics_auth_enabled: bool = False
+    analytics_auth_username: str = ""
+    analytics_auth_password: str = ""

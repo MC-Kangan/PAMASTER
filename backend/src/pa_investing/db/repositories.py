@@ -1,5 +1,5 @@
 from collections.abc import Mapping
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -192,6 +192,29 @@ class PortfolioSnapshotRepository:
         record.gross_exposure = snapshot.gross_exposure
         record.net_exposure = snapshot.net_exposure
         record.unrealized_pnl = snapshot.unrealized_pnl
+
+    def list_history(
+        self,
+        days: int | None = None,
+        now: datetime | None = None,
+    ) -> list[PortfolioSnapshot]:
+        stmt = select(PortfolioSnapshotRecord).order_by(PortfolioSnapshotRecord.observed_at.asc())
+        if days is not None:
+            cutoff = _normalize_utc_timestamp(now or datetime.now(tz=UTC)) - timedelta(days=days)
+            stmt = stmt.where(PortfolioSnapshotRecord.observed_at >= cutoff)
+        rows = self.session.scalars(stmt).all()
+        return [
+            PortfolioSnapshot(
+                snapshot_id=row.snapshot_id,
+                observed_at=_normalize_utc_timestamp(row.observed_at),
+                base_currency=row.base_currency,
+                nav=row.nav,
+                gross_exposure=row.gross_exposure,
+                net_exposure=row.net_exposure,
+                unrealized_pnl=row.unrealized_pnl,
+            )
+            for row in rows
+        ]
 
 
 class SignalRepository:
