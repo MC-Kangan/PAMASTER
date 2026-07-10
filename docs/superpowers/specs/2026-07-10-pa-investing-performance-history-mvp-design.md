@@ -21,7 +21,9 @@ This slice adds:
 
 - snapshot-based performance history analytics;
 - backend endpoints for chart-ready time-series data;
-- a browser analytics view for performance history;
+- a mobile-capable browser analytics view for performance history;
+- a lightweight authentication layer for the browser app;
+- scheduled portfolio snapshot creation at fixed times;
 - a compact summary path that can later feed Notion.
 
 This slice does not add:
@@ -50,12 +52,24 @@ It is the best fit for the MVP because:
 - it supports useful charts quickly;
 - it stays aligned with the current refresh workflow.
 
+## Browser App Technology Direction
+
+The browser analytics surface should support both desktop and smartphone usage.
+
+Because of that requirement, this slice should not assume Streamlit as the primary app framework. I could not find current official Streamlit documentation that gives a strong mobile-first or built-in authentication direction, so the safer design assumption is:
+
+- keep the backend/API as the stable core;
+- keep Notion as the quick summary layer;
+- evolve the browser analytics surface with a responsive web UI that is designed explicitly for phone and desktop layouts.
+
+This does not rule Streamlit out forever, but it should not be the default assumption for the performance-history MVP.
+
 ## Output Surfaces
 
 The output model for this slice is:
 
 - Notion remains the summary surface;
-- the browser analytics app becomes the deeper drilldown surface;
+- the browser analytics app becomes the deeper drilldown surface on both phone and desktop;
 - backend/API becomes the single data contract for both.
 
 This preserves the operating pattern already chosen for the overall product:
@@ -93,6 +107,23 @@ This slice will read ordered snapshots and build performance series from them.
 
 No separate historical storage layer is needed for the MVP.
 
+## Snapshot Cadence
+
+The performance history should not depend only on ad hoc manual refreshes.
+
+This slice should support a scheduled snapshot cadence at four fixed times per day:
+
+- `00:00`
+- `06:00`
+- `12:00`
+- `18:00`
+
+For the MVP, these should be treated as local deployment times, with timezone configured at the application or host level. Since your environment is personal and likely anchored to one deployment location, this is a consistent and understandable starting rule.
+
+The schedule exists to ensure there is dependable history even when the user is not manually running the app.
+
+This does not require full job-orchestration sophistication yet. It only requires the architecture to treat scheduled snapshots as a first-class input into performance history.
+
 ## Analytics Model
 
 The backend should expose a small performance-history service that accepts an ordered list of snapshots and produces a chart-ready series.
@@ -125,11 +156,18 @@ This keeps the API compact while giving enough control for charts.
 
 The first version does not need pagination, benchmark overlays, or highly customized interval aggregation.
 
+The history API should work for both:
+
+- manually triggered snapshots from the refresh workflow;
+- scheduled snapshots created at the fixed cadence above.
+
 ## API Surface
 
 Add a new analysis endpoint, likely:
 
 - `GET /analysis/performance`
+
+The backend may also need a small scheduled-snapshot trigger path later, but that is secondary to the performance read path for this MVP.
 
 Recommended response shape:
 
@@ -158,7 +196,31 @@ The first version should display:
 - an unrealized PnL history chart or series;
 - summary figures for ending NAV, window return, and max drawdown.
 
-The page does not need a polished dashboard shell yet. It only needs to be clearly usable and consistent with the current lightweight analytics app.
+The page does not need a polished dashboard shell yet. It does need to be clearly usable on:
+
+- desktop browser widths;
+- smartphone browser widths.
+
+That means the charts and summary cards should stack cleanly on small screens rather than assuming a desktop-only layout.
+
+## Authentication
+
+The browser analytics surface should include an authentication layer.
+
+For the MVP, the auth requirement is primarily for the browser app, not for Notion itself.
+
+Recommended auth stance:
+
+- browser app: protected behind a simple login or session-based access control;
+- Notion integration: continue using a trusted personal token or internal connection model for now;
+- no public multi-user OAuth for the browser app in this slice.
+
+This is the right boundary for a personal system:
+
+- the browser app may be reachable over your NAS or another hosted surface and therefore should not be left open;
+- Notion does not need a separate end-user auth flow when it is being written by your backend as a trusted personal integration.
+
+If the system later becomes multi-user or shareable, the auth model can be expanded. For now, simple authenticated access is enough.
 
 ## Relationship To Notion
 
@@ -186,6 +248,11 @@ Recommended MVP behavior:
 - return validation errors for malformed query values;
 - avoid treating missing history as a server error.
 
+For auth:
+
+- unauthenticated browser-app requests should be denied cleanly;
+- backend-only scheduled snapshot jobs should not rely on an interactive login flow.
+
 ## Testing
 
 Add focused coverage for:
@@ -195,7 +262,9 @@ Add focused coverage for:
 - correct simple return behavior;
 - empty-history handling;
 - API response shape for the performance endpoint;
-- browser page route smoke coverage if the app page is added through the existing server-side HTML path.
+- browser page route smoke coverage if the app page is added through the existing server-side HTML path;
+- authentication gating for the browser surface;
+- scheduled snapshot behavior at fixed cadence boundaries where scheduling logic is introduced.
 
 Tests should remain deterministic and should not depend on live Notion or price APIs.
 
@@ -204,8 +273,10 @@ Tests should remain deterministic and should not depend on live Notion or price 
 This slice is successful when:
 
 - multiple refresh runs produce a visible history in the browser app;
+- scheduled snapshots can produce consistent history points even without manual refreshes;
 - the backend can return NAV, unrealized PnL, simple return, and max drawdown over a selected window;
-- the browser analytics page can render a useful performance view from persisted snapshots;
+- the browser analytics page can render a useful performance view from persisted snapshots on desktop and smartphone screens;
+- the browser app is not publicly open without authentication;
 - Notion remains the lightweight summary surface while the browser app becomes the deeper inspection surface.
 
 ## Future Extensions
