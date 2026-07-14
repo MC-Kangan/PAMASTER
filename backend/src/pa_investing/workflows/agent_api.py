@@ -13,6 +13,7 @@ from pa_investing.sizing.models import MaxNavWeightSizingModel
 
 class DailyReviewResult(BaseModel):
     snapshot: PortfolioSnapshot
+    positions: list[Position]
     signals: list[Signal]
 
 
@@ -37,4 +38,8 @@ class AgentAPI:
             stop_prices=stop_prices,
             portfolio_nav=snapshot.nav,
         )
-        return DailyReviewResult(snapshot=snapshot, signals=signals)
+        return DailyReviewResult(
+            snapshot=snapshot,
+            positions=positions,
+            signals=signals,
+        )

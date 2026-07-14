@@ -20,6 +20,7 @@ from pa_investing.core.dependencies import (
     get_settings,
 )
 from pa_investing.db.repositories import PortfolioSnapshotRepository
+from pa_investing.presentation.fields import serialize_decimal
 from pa_investing.workflows.refresh_and_sync import RefreshAndSyncWorkflow
 
 router = APIRouter()
@@ -96,10 +97,7 @@ def refresh_and_sync_route(
 
 
 def _format_decimal(value: object) -> str:
-    formatted = format(value, "f")
-    if "." not in formatted:
-        return formatted
-    return formatted.rstrip("0").rstrip(".")
+    return serialize_decimal(value)
 
 
 def _format_decimal_or_none(value: Decimal | None) -> str | None:

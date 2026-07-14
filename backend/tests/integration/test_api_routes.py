@@ -6,8 +6,8 @@ from fastapi.testclient import TestClient
 
 from pa_investing.core.config import Settings
 from pa_investing.core.dependencies import get_refresh_and_sync_workflow, get_settings
-from pa_investing.domain.enums import SignalSeverity, SignalStatus, SignalType
-from pa_investing.domain.models import PortfolioSnapshot, Signal
+from pa_investing.domain.enums import AssetClass, SignalSeverity, SignalStatus, SignalType
+from pa_investing.domain.models import Instrument, PortfolioSnapshot, Position, Signal
 from pa_investing.main import create_app
 from pa_investing.workflows.agent_api import DailyReviewResult
 
@@ -25,6 +25,19 @@ class FakeRefreshAndSyncWorkflow:
                 net_exposure=Decimal("1750"),
                 unrealized_pnl=Decimal("250"),
             ),
+            positions=[
+                Position(
+                    account_id="acct-1",
+                    instrument=Instrument(
+                        symbol="AAPL",
+                        name="Apple Inc.",
+                        asset_class=AssetClass.EQUITY,
+                    ),
+                    quantity=Decimal("10"),
+                    average_cost=Decimal("150"),
+                    latest_price=Decimal("175"),
+                )
+            ],
             signals=[
                 Signal(
                     signal_id="sig-123",
@@ -41,8 +54,17 @@ class FakeRefreshAndSyncWorkflow:
         )
 
 
+def _public_test_client() -> TestClient:
+    app = create_app()
+    app.dependency_overrides[get_settings] = lambda: Settings(
+        analytics_auth_enabled=False,
+        workflow_api_token="test-token",
+    )
+    return TestClient(app)
+
+
 def test_health_route() -> None:
-    client = TestClient(create_app())
+    client = _public_test_client()
 
     response = client.get("/health")
 
@@ -51,7 +73,7 @@ def test_health_route() -> None:
 
 
 def test_portfolio_analysis_page() -> None:
-    client = TestClient(create_app())
+    client = _public_test_client()
 
     response = client.get("/analysis/portfolio")
 
@@ -60,7 +82,7 @@ def test_portfolio_analysis_page() -> None:
 
 
 def test_analysis_signal_page_contains_signal_id() -> None:
-    client = TestClient(create_app())
+    client = _public_test_client()
 
     response = client.get("/analysis/signal/sig-123")
 
@@ -70,7 +92,7 @@ def test_analysis_signal_page_contains_signal_id() -> None:
 
 
 def test_analysis_signal_page_escapes_signal_id_html() -> None:
-    client = TestClient(create_app())
+    client = _public_test_client()
 
     response = client.get("/analysis/signal/<sig&123>")
 
@@ -80,6 +102,10 @@ def test_analysis_signal_page_escapes_signal_id_html() -> None:
 
 def test_refresh_and_sync_route_returns_summary() -> None:
     app = create_app()
+    app.dependency_overrides[get_settings] = lambda: Settings(
+        analytics_auth_enabled=False,
+        workflow_api_token="test-token",
+    )
 
     app.dependency_overrides[get_refresh_and_sync_workflow] = (
         lambda: FakeRefreshAndSyncWorkflow()
@@ -89,6 +115,7 @@ def test_refresh_and_sync_route_returns_summary() -> None:
     response = client.post(
         "/workflows/refresh-and-sync",
         json={"stop_prices": {"AAPL": "180"}},
+        headers={"Authorization": "Bearer test-token"},
     )
 
     assert response.status_code == 200
@@ -169,6 +196,10 @@ def test_refresh_route_accepts_configured_workflow_token() -> None:
 
 def test_performance_route_returns_history_summary_and_points() -> None:
     app = create_app()
+    app.dependency_overrides[get_settings] = lambda: Settings(
+        analytics_auth_enabled=False,
+        workflow_api_token="test-token",
+    )
 
     class FakePortfolioSnapshotRepository:
         def list_history(self, days: int | None = None) -> list[PortfolioSnapshot]:
@@ -234,6 +265,10 @@ def test_performance_route_returns_history_summary_and_points() -> None:
 
 def test_performance_route_returns_empty_series_when_no_history_exists() -> None:
     app = create_app()
+    app.dependency_overrides[get_settings] = lambda: Settings(
+        analytics_auth_enabled=False,
+        workflow_api_token="test-token",
+    )
 
     class FakePortfolioSnapshotRepository:
         def list_history(self, days: int | None = None) -> list[PortfolioSnapshot]:
@@ -311,7 +346,7 @@ def test_browser_analytics_route_returns_service_error_for_blank_auth_config() -
 
 
 def test_performance_analysis_page_renders() -> None:
-    client = TestClient(create_app())
+    client = _public_test_client()
 
     response = client.get("/analysis/portfolio")
 
@@ -319,3 +354,5 @@ def test_performance_analysis_page_renders() -> None:
     assert "Performance History" in response.text
     assert "Window Return" in response.text
     assert 'id="performance-history"' in response.text
+    assert 'id="performance-body"' in response.text
+    assert "overflow-wrap: anywhere;" in response.text

@@ -24,7 +24,7 @@ from pa_investing.domain.enums import AssetClass
 from pa_investing.domain.models import Account, Instrument, Position, PricePoint
 from pa_investing.market_data.interfaces import MarketDataProvider
 from pa_investing.notion.client import FakeNotionClient
-from pa_investing.notion.schemas import NotionPagePayload
+from pa_investing.notion.schemas import NotionPagePayload, NotionPropertyValue
 from pa_investing.notion.sync import NotionSync
 from pa_investing.workflows.daily_review import DailyReviewPersistence, DailyReviewWorkflow
 from pa_investing.workflows.refresh_and_sync import RefreshAndSyncWorkflow
@@ -154,7 +154,7 @@ def test_refresh_and_sync_workflow_updates_prices_and_syncs_notion() -> None:
     assert list(notion_client.pages["Daily Review"]) == [daily_review_external_id]
     assert (
         notion_client.pages["Daily Review"][daily_review_external_id].properties["NAV"]
-        == "1750"
+        == NotionPropertyValue.number(Decimal("1750.00000000"))
     )
 
 

@@ -1,7 +1,7 @@
 import httpx
 
 from pa_investing.notion.client import NotionClient
-from pa_investing.notion.schemas import NotionPagePayload
+from pa_investing.notion.schemas import NotionDatabaseSchema, NotionPagePayload
 
 NOTION_API_URL = "https://api.notion.com/v1/pages"
 NOTION_DATABASE_URL = "https://api.notion.com/v1/databases"
@@ -19,6 +19,7 @@ class LiveNotionClient(NotionClient):
         self.api_key = api_key
         self.database_ids = database_ids
         self.transport = transport
+        self._schema_cache: dict[str, NotionDatabaseSchema] = {}
 
     def upsert_page(
         self,
@@ -29,10 +30,15 @@ class LiveNotionClient(NotionClient):
         database_id = self.database_ids[database_name]
 
         with httpx.Client(transport=self.transport, timeout=10.0) as client:
+            schema = self._get_database_schema(
+                client=client,
+                database_id=database_id,
+            )
             page_id = self._find_page_id(
                 client=client,
                 database_id=database_id,
                 external_id=external_id,
+                schema=schema,
             )
             if page_id is None:
                 return self._create_page(
@@ -40,26 +46,47 @@ class LiveNotionClient(NotionClient):
                     database_id=database_id,
                     external_id=external_id,
                     payload=payload,
+                    schema=schema,
                 )
             return self._update_page(
                 client=client,
                 page_id=page_id,
                 external_id=external_id,
                 payload=payload,
+                schema=schema,
             )
+
+    def _get_database_schema(
+        self,
+        client: httpx.Client,
+        database_id: str,
+    ) -> NotionDatabaseSchema:
+        cached = self._schema_cache.get(database_id)
+        if cached is not None:
+            return cached
+
+        response = client.get(
+            f"{NOTION_DATABASE_URL}/{database_id}",
+            headers=self._headers(),
+        )
+        response.raise_for_status()
+        schema = NotionDatabaseSchema.from_notion_database(response.json())
+        self._schema_cache[database_id] = schema
+        return schema
 
     def _find_page_id(
         self,
         client: httpx.Client,
         database_id: str,
         external_id: str,
+        schema: NotionDatabaseSchema,
     ) -> str | None:
         response = client.post(
             f"{NOTION_DATABASE_URL}/{database_id}/query",
             headers=self._headers(),
             json={
                 "filter": {
-                    "property": "External ID",
+                    "property": schema.external_id_property_name,
                     "rich_text": {
                         "equals": external_id,
                     },
@@ -78,6 +105,7 @@ class LiveNotionClient(NotionClient):
         database_id: str,
         external_id: str,
         payload: NotionPagePayload,
+        schema: NotionDatabaseSchema,
     ) -> str:
         response = client.post(
             NOTION_API_URL,
@@ -85,6 +113,7 @@ class LiveNotionClient(NotionClient):
             json=payload.to_notion_create_body(
                 database_id=database_id,
                 external_id=external_id,
+                schema=schema,
             ),
         )
         response.raise_for_status()
@@ -96,11 +125,15 @@ class LiveNotionClient(NotionClient):
         page_id: str,
         external_id: str,
         payload: NotionPagePayload,
+        schema: NotionDatabaseSchema,
     ) -> str:
         response = client.patch(
             f"{NOTION_API_URL}/{page_id}",
             headers=self._headers(),
-            json=payload.to_notion_update_body(external_id=external_id),
+            json=payload.to_notion_update_body(
+                external_id=external_id,
+                schema=schema,
+            ),
         )
         response.raise_for_status()
         self._sync_page_body(

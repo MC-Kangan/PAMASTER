@@ -26,6 +26,7 @@ The project has:
 In practical terms, the repo can now:
 
 - seed a demo portfolio
+- import IBKR positions through a NAS-suitable Flex Web Service connector
 - refresh prices through a live market-data adapter
 - compute and persist snapshots and signals
 - sync `Signals` and `Daily Review` to Notion
@@ -53,6 +54,7 @@ Implemented:
   - portfolio snapshots
   - signals
 - CSV position import
+- broker import workflow boundary
 - manual price provider
 - deterministic sizing and stop/reference signal rules
 - fake Notion client for local and test flows
@@ -72,6 +74,10 @@ Implemented:
 - end-to-end refresh-and-sync workflow
 - `POST /workflows/refresh-and-sync`
 - demo portfolio seed flow
+- IBKR broker import scaffolding:
+  - Flex Web Service connector for secure scheduled NAS import
+  - Client Portal Gateway connector kept as a local/manual fallback
+  - shared import workflow that upserts broker accounts and positions
 - backend runbook for local MVP execution
 
 The demo seed flow includes:
@@ -129,7 +135,10 @@ High-level layout:
 - `audit/`
   - audit event domain objects
 - `brokers/`
-  - import interfaces and CSV importer
+  - import interfaces
+  - CSV importer
+  - IBKR Flex Web Service connector
+  - optional IBKR Client Portal Gateway connector
 - `core/`
   - settings
   - dependency wiring
@@ -176,6 +185,17 @@ The current backend flow is roughly:
 7. sync summary outputs to Notion
 8. expose deeper history through browser analytics endpoints
 
+## Broker Import Direction
+
+For IBKR, the preferred deployable path is Flex Web Service. It uses a token and query id
+created in IBKR Client Portal, does not require storing the IBKR username/password in this
+app, and fits a NAS scheduler. It is best for daily or intermittent position/account reads,
+not intraday trading workflows.
+
+The Client Portal Gateway connector remains in the codebase for local manual testing, but it
+is not the recommended NAS path because it depends on an interactive browser login and a
+short-lived session. The app still does not place trades.
+
 ## Current API Surface
 
 Implemented routes:
@@ -203,6 +223,10 @@ token in a non-test environment return a service-configuration error rather than
 endpoint. PostgreSQL is private to the Compose network and the backend binds to loopback by
 default; remote browser access should use the NAS HTTPS reverse proxy or a trusted VPN. The
 full setup and scheduler commands are in the [backend runbook](backend/README.md).
+
+For real IBKR position import, configure `PA_IBKR_FLEX_TOKEN` and
+`PA_IBKR_FLEX_QUERY_ID`. The existing import command auto-selects Flex when those values are
+present and otherwise falls back to the local Gateway connector.
 
 ## What Still Needs To Be Done For The Next MVP Slice
 
@@ -235,6 +259,7 @@ Good starting points if you want to orient yourself quickly:
 - refresh workflow: [backend/src/pa_investing/workflows/refresh_and_sync.py](backend/src/pa_investing/workflows/refresh_and_sync.py)
 - performance history logic: [backend/src/pa_investing/analytics/performance.py](backend/src/pa_investing/analytics/performance.py)
 - demo seed CLI: [backend/src/pa_investing/scripts/seed_demo_portfolio.py](backend/src/pa_investing/scripts/seed_demo_portfolio.py)
+- IBKR import CLI: [backend/src/pa_investing/scripts/import_ibkr_positions.py](backend/src/pa_investing/scripts/import_ibkr_positions.py)
 - scheduled snapshot CLI: [backend/src/pa_investing/scripts/run_scheduled_snapshot.py](backend/src/pa_investing/scripts/run_scheduled_snapshot.py)
 
 ## Related Documents

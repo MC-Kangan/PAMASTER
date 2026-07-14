@@ -13,6 +13,7 @@ from pa_investing.db.repositories import (
     SignalRepository,
 )
 from pa_investing.notion.client import FakeNotionClient
+from pa_investing.notion.schemas import NotionPropertyValue
 from pa_investing.notion.sync import NotionSync
 from pa_investing.workflows.daily_review import DailyReviewPersistence, DailyReviewWorkflow
 
@@ -67,5 +68,5 @@ def test_daily_review_workflow_persists_snapshot_and_signals_before_notion_sync(
     assert next(iter(notion_client.pages["Signals"])) == result.signals[0].signal_id
     assert (
         notion_client.pages["Signals"][result.signals[0].signal_id].properties["Analytics Link"]
-        == f"/analysis/signal/{result.signals[0].signal_id}"
+        == NotionPropertyValue.url(f"/analysis/signal/{result.signals[0].signal_id}")
     )

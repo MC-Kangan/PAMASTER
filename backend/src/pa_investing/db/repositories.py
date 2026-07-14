@@ -1,4 +1,4 @@
-from collections.abc import Mapping
+from collections.abc import Mapping, Set
 from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import select
@@ -98,6 +98,27 @@ class PositionRepository:
                 )
             )
         return positions
+
+    def close_positions_missing_from_snapshot(
+        self,
+        account_ids: Set[str],
+        symbols_by_account: Mapping[str, Set[str]],
+    ) -> int:
+        if not account_ids:
+            return 0
+        stmt = select(PositionRecord).where(
+            PositionRecord.account_id.in_(sorted(account_ids)),
+            PositionRecord.quantity != 0,
+        )
+        records = self.session.scalars(stmt).all()
+        closed = 0
+        for record in records:
+            imported_symbols = symbols_by_account.get(record.account_id, set())
+            if record.symbol in imported_symbols:
+                continue
+            record.quantity = 0
+            closed += 1
+        return closed
 
     def _upsert_instrument(self, instrument: Instrument) -> None:
         record = self.session.get(InstrumentRecord, instrument.symbol)

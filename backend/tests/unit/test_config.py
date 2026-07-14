@@ -19,9 +19,11 @@ def test_settings_include_live_notion_and_market_data_fields() -> None:
         notion_daily_review_database_id="daily-review-db",
         market_data_provider="alpha_vantage",
         alpha_vantage_api_key="alpha-key",
+        ibkr_gateway_base_url="https://127.0.0.1:5000/v1/api",
     )
 
     assert settings.notion_signals_database_id == "signals-db"
     assert settings.notion_daily_review_database_id == "daily-review-db"
     assert settings.market_data_provider == "alpha_vantage"
     assert settings.alpha_vantage_api_key == "alpha-key"
+    assert settings.ibkr_gateway_base_url == "https://127.0.0.1:5000/v1/api"

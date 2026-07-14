@@ -25,6 +25,8 @@ The backend currently includes:
 - domain models for accounts, instruments, positions, prices, snapshots, and signals
 - SQLAlchemy repositories and Alembic migrations
 - demo portfolio seeding
+- IBKR Flex Web Service position import for NAS-friendly scheduled reads
+- optional IBKR Client Portal Gateway connector for local/manual testing
 - live market data through Alpha Vantage
 - live Notion sync for `Signals` and `Daily Review`
 - refresh-and-sync workflow
@@ -41,7 +43,7 @@ Main package layout under [src/pa_investing](src/pa_investing/):
 - `analytics/`: calculations and snapshot/performance logic
 - `analytics_app/`: browser-facing HTML page builders
 - `api/`: FastAPI routes, schemas, and auth helper
-- `brokers/`: CSV import path
+- `brokers/`: CSV import path and broker connectors
 - `core/`: config and dependency wiring
 - `db/`: ORM models, repositories, session factory
 - `domain/`: core business models and enums
@@ -137,6 +139,36 @@ The seeded account is `pa-demo` and the starter symbols are:
 - `SMH`
 
 The CSV-backed seed fixture includes placeholder `latest_price` values so the portfolio is complete immediately after loading. Those are only starting marks. The refresh workflow is expected to replace them with provider prices where supported.
+
+## IBKR Position Import
+
+The preferred IBKR path for NAS deployment is Flex Web Service. In IBKR Client Portal,
+enable Flex Web Service, create an Activity Flex Query that includes open positions and
+account information, then copy the token and query id into `.env`:
+
+```bash
+PA_IBKR_FLEX_TOKEN=your_flex_token
+PA_IBKR_FLEX_QUERY_ID=your_query_id
+```
+
+Then run:
+
+```bash
+python -m pa_investing.scripts.import_ibkr_positions
+```
+
+The command auto-selects Flex when `PA_IBKR_FLEX_TOKEN` and `PA_IBKR_FLEX_QUERY_ID` are
+present. It upserts IBKR accounts and supported positions into PostgreSQL, and closes
+previous IBKR positions that are missing from the latest import by setting quantity to zero.
+
+The older Client Portal Gateway connector is still available for local/manual testing:
+
+```bash
+python -m pa_investing.scripts.import_ibkr_positions --source gateway --gateway-url https://localhost:5001/v1/api
+```
+
+Gateway is not the recommended NAS path because it relies on an interactive browser login
+and a short-lived session. The import command does not place trades.
 
 ## Refresh-And-Sync Workflow Trigger
 
