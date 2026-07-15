@@ -4,7 +4,12 @@ import httpx
 
 from pa_investing.brokers.interfaces import BrokerConnector
 from pa_investing.domain.enums import AssetClass
-from pa_investing.domain.models import Account, Instrument, Position
+from pa_investing.domain.models import (
+    Account,
+    Instrument,
+    InstrumentIdentifier,
+    Position,
+)
 
 DEFAULT_IBKR_TIMEOUT_SECONDS = 10.0
 ETF_NAME_HINTS = (
@@ -137,6 +142,13 @@ class IbkrClientPortalConnector(BrokerConnector):
                         name=_first_text(row, "description", "contractDesc", default=symbol),
                         asset_class=asset_class,
                         currency=_first_text(row, "currency", default="USD"),
+                        venue=_first_text(
+                            row,
+                            "listingExchange",
+                            "exchange",
+                        )
+                        or None,
+                        identifiers=_instrument_identifiers(row),
                     ),
                     quantity=quantity,
                     average_cost=average_cost,
@@ -218,6 +230,21 @@ def _optional_decimal(*values: object) -> Decimal | None:
             continue
         return Decimal(str(value))
     return None
+
+
+def _instrument_identifiers(
+    payload: dict[str, object],
+) -> tuple[InstrumentIdentifier, ...]:
+    conid = _first_text(payload, "conid", "conId")
+    if not conid:
+        return ()
+    return (
+        InstrumentIdentifier(
+            provider="ibkr",
+            identifier_type="conid",
+            value=conid,
+        ),
+    )
 
 
 def _map_asset_class(payload: dict[str, object]) -> AssetClass:

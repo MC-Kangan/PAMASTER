@@ -5,9 +5,9 @@ from sqlalchemy.orm import sessionmaker
 
 from pa_investing.brokers.interfaces import BrokerConnector
 from pa_investing.db.base import Base
-from pa_investing.db.models import PositionRecord
+from pa_investing.db.models import InstrumentRecord, PositionRecord
 from pa_investing.db.repositories import AccountRepository, PositionRepository
-from pa_investing.domain.enums import AssetClass
+from pa_investing.domain.enums import AssetClass, CostBasisStatus
 from pa_investing.domain.models import Account, Instrument, Position
 from pa_investing.workflows.broker_import import BrokerImportWorkflow
 
@@ -51,6 +51,11 @@ def test_broker_import_workflow_overwrites_matching_account_positions() -> None:
                 average_cost=Decimal("400"),
                 latest_price=Decimal("500"),
             )
+        )
+        position_repository.set_manual_average_cost(
+            "U1234567",
+            "SPGI",
+            Decimal("0"),
         )
         position_repository.upsert(
             Position(
@@ -99,6 +104,7 @@ def test_broker_import_workflow_overwrites_matching_account_positions() -> None:
                         quantity=Decimal("10"),
                         average_cost=Decimal("420"),
                         latest_price=Decimal("510"),
+                        cost_basis_status=CostBasisStatus.BROKER,
                     ),
                     Position(
                         account_id="U1234567",
@@ -111,6 +117,7 @@ def test_broker_import_workflow_overwrites_matching_account_positions() -> None:
                         quantity=Decimal("50"),
                         average_cost=Decimal("41"),
                         latest_price=Decimal("45"),
+                        cost_basis_status=CostBasisStatus.UNAVAILABLE,
                     ),
                 ],
             ),
@@ -122,19 +129,37 @@ def test_broker_import_workflow_overwrites_matching_account_positions() -> None:
         result = workflow.run()
         session.commit()
 
-        stored_positions = session.scalars(
-            select(PositionRecord).order_by(PositionRecord.account_id, PositionRecord.symbol)
+        stored_positions = session.execute(
+            select(PositionRecord, InstrumentRecord)
+            .join(
+                InstrumentRecord,
+                PositionRecord.instrument_id == InstrumentRecord.instrument_id,
+            )
+            .order_by(PositionRecord.account_id, InstrumentRecord.symbol)
         ).all()
 
     assert result.accounts_imported == 1
     assert result.positions_imported == 2
     assert result.positions_closed == 1
+    assert result.cost_basis_available == 1
+    assert result.cost_basis_missing == 1
+    assert result.missing_cost_basis_positions == [
+        {
+            "account_id": "U1234567",
+            "symbol": "SGLN",
+            "reason": "cost basis unavailable",
+        }
+    ]
 
     position_by_key = {
-        (record.account_id, record.symbol): record
-        for record in stored_positions
+        (position.account_id, instrument.symbol): position
+        for position, instrument in stored_positions
     }
     assert position_by_key[("U1234567", "SPGI")].quantity == Decimal("10")
+    assert position_by_key[("U1234567", "SPGI")].average_cost == Decimal("0")
+    assert position_by_key[("U1234567", "SPGI")].manual_average_cost == Decimal("0")
+    assert position_by_key[("U1234567", "SPGI")].broker_average_cost == Decimal("420")
+    assert position_by_key[("U1234567", "SPGI")].cost_basis_status == "manual"
     assert position_by_key[("U1234567", "SGLN")].quantity == Decimal("50")
     assert position_by_key[("U1234567", "ASML")].quantity == Decimal("0")
     assert position_by_key[("manual-pa", "AAPL")].quantity == Decimal("2")

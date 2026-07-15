@@ -21,15 +21,23 @@ The project has:
 
 - completed the Phase 1 backend foundation
 - completed the first visible Phase 2 MVP loop for demo data
-- started the next MVP slice for performance history analytics
+- completed the Notion portfolio settings/accounts/positions backend slice
+- completed the general internal instrument identity backend slice
 
 In practical terms, the repo can now:
 
 - seed a demo portfolio
 - import IBKR positions through a NAS-suitable Flex Web Service connector
+- preserve broker cost separately from persistent manual cost overrides
+- identify instruments internally instead of treating ticker symbols as database keys
+- retain optional generic provider identifiers such as IBKR `conid`
+- support the same display symbol on different venues without merging positions or prices
+- exclude positions with unavailable cost basis from reliable P&L totals
 - refresh prices through a live market-data adapter
 - compute and persist snapshots and signals
 - sync `Signals` and `Daily Review` to Notion
+- read portfolio base currency and manual cost overrides from Notion
+- sync compact `Settings`, `Accounts`, and `Positions` views without overwriting user fields
 - expose a manual refresh API
 - expose a performance-history API
 - protect browser analytics routes with a simple auth gate
@@ -68,6 +76,9 @@ Implemented:
 - live Notion client behind the existing interface
 - idempotent Notion upsert behavior using `External ID`
 - Notion sync targets:
+  - `Settings`
+  - `Accounts`
+  - `Positions`
   - `Signals`
   - `Daily Review`
 - Alpha Vantage market-data provider
@@ -115,6 +126,19 @@ Still pending in this slice:
 - richer visual chart rendering
 - entering the four command triggers in the uGREEN NAS scheduler
 - visual verification of the richer dashboard on computer and smartphone browsers
+
+### Phase 2: General Instrument Identity Slice
+
+Implemented:
+
+- stable internal instrument IDs for positions and historical prices
+- deterministic migration of all legacy symbol-keyed data
+- optional generic provider identifiers with uniqueness safeguards
+- IBKR Flex parsing for `conid`, ISIN, local symbol, and listing venue when available
+- Client Portal parsing for `conid` and venue when available
+- duplicate-symbol support across distinct venues
+- ambiguous symbol-only quote protection pending provider mapping in the FX/quote slice
+- internal-ID-based Notion position external IDs with legacy external-ID read compatibility
 
 ## Code Structure
 
@@ -176,14 +200,15 @@ High-level layout:
 
 The current backend flow is roughly:
 
-1. load positions from PostgreSQL
-2. refresh prices through a market-data provider
-3. update stored marks
-4. build a portfolio snapshot
-5. generate deterministic signals
-6. persist snapshots, signals, and audit data
-7. sync summary outputs to Notion
-8. expose deeper history through browser analytics endpoints
+1. read configured portfolio settings and manual cost overrides from Notion
+2. load reconciled positions from PostgreSQL
+3. refresh prices through a market-data provider
+4. update stored marks
+5. build a portfolio snapshot
+6. generate deterministic signals
+7. persist snapshots, signals, settings, and audit data
+8. sync accounts, positions, signals, and summary outputs to Notion
+9. expose deeper history through browser analytics endpoints
 
 ## Broker Import Direction
 
@@ -227,6 +252,11 @@ full setup and scheduler commands are in the [backend runbook](backend/README.md
 For real IBKR position import, configure `PA_IBKR_FLEX_TOKEN` and
 `PA_IBKR_FLEX_QUERY_ID`. The existing import command auto-selects Flex when those values are
 present and otherwise falls back to the local Gateway connector.
+
+Imported positions now retain broker cost provenance. A manual average-cost override, including
+an explicit zero for a genuinely free share, survives later broker imports. Positions without a
+reliable cost basis display `unavailable` and are excluded from reliable P&L. The user-facing
+Notion `Cost Override` field is part of the next implementation slice.
 
 ## What Still Needs To Be Done For The Next MVP Slice
 

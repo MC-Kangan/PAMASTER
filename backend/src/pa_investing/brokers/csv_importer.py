@@ -2,7 +2,7 @@ import csv
 from decimal import Decimal
 from pathlib import Path
 
-from pa_investing.domain.enums import AssetClass
+from pa_investing.domain.enums import AssetClass, CostBasisStatus
 from pa_investing.domain.models import Instrument, Position
 
 
@@ -29,6 +29,7 @@ class CsvPositionImporter:
 
             positions: list[Position] = []
             for row in reader:
+                average_cost = Decimal(row["average_cost"])
                 instrument = Instrument(
                     symbol=row["symbol"],
                     name=row["name"],
@@ -40,10 +41,12 @@ class CsvPositionImporter:
                         account_id=row["account_id"],
                         instrument=instrument,
                         quantity=Decimal(row["quantity"]),
-                        average_cost=Decimal(row["average_cost"]),
+                        average_cost=average_cost,
                         latest_price=(
                             Decimal(row["latest_price"]) if row["latest_price"] else None
                         ),
+                        cost_basis_status=CostBasisStatus.MANUAL,
+                        manual_average_cost=average_cost,
                     )
                 )
             return positions

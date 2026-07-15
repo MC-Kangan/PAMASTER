@@ -3,10 +3,16 @@ from decimal import Decimal
 
 from sqlalchemy import select
 
+from pa_investing.analytics.metrics import (
+    calculate_exposure_by_currency,
+    calculate_portfolio_summary,
+    calculate_unrealized_pnl_by_currency,
+)
 from pa_investing.core.config import Settings
 from pa_investing.db.models import AccountRecord
 from pa_investing.db.repositories import PositionRepository
 from pa_investing.db.session import DatabaseSessionFactory
+from pa_investing.domain.enums import CostBasisStatus
 
 
 def show_positions(
@@ -34,7 +40,7 @@ def show_positions(
         print(f"Open positions: {len(positions)}")
         print(
             "account_id | symbol | name | asset_class | currency | "
-            "quantity | avg_cost | price | mv"
+            "quantity | avg_cost | price | mv | cost_basis_status | unrealized_pnl"
         )
         for position in positions:
             print(
@@ -49,9 +55,52 @@ def show_positions(
                         _format_decimal(position.average_cost),
                         _format_decimal(position.latest_price),
                         _format_decimal(position.market_value),
+                        position.cost_basis_status.value,
+                        (
+                            "unavailable"
+                            if position.cost_basis_status == CostBasisStatus.UNAVAILABLE
+                            else _format_decimal(position.unrealized_pnl)
+                        ),
                     ]
                 )
             )
+
+        # Portfolio summary
+        summary = calculate_portfolio_summary(positions)
+        exposure_by_currency = calculate_exposure_by_currency(positions)
+        pnl_by_currency = calculate_unrealized_pnl_by_currency(positions)
+
+        print()
+        print("Portfolio summary")
+        print(f"- total market value: {_format_decimal(summary['total_market_value'])}")
+        print(f"- positions: {summary['position_count']}")
+        print(f"- cost basis available: {summary['cost_basis_available']}")
+        print(f"- cost basis missing: {summary['cost_basis_missing']}")
+        print()
+        print("Market value by currency:")
+        for currency in sorted(exposure_by_currency):
+            print(f"  {currency}: {_format_decimal(exposure_by_currency[currency])}")
+        print()
+        print("Unrealized PnL by currency (excluding unavailable cost basis):")
+        if pnl_by_currency:
+            for currency in sorted(pnl_by_currency):
+                print(f"  {currency}: {_format_decimal(pnl_by_currency[currency])}")
+        else:
+            print("  (none)")
+        print()
+        print("Cost basis warnings:")
+        warnings = [
+            position for position in positions
+            if position.cost_basis_status == CostBasisStatus.UNAVAILABLE
+        ]
+        if warnings:
+            for position in warnings:
+                print(
+                    f"- missing cost basis {position.account_id} "
+                    f"{position.instrument.symbol}"
+                )
+        else:
+            print("  (none)")
 
 
 def _format_decimal(value: Decimal | None) -> str:

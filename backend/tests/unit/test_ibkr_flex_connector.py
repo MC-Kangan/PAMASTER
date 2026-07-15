@@ -4,7 +4,7 @@ import httpx
 import pytest
 
 from pa_investing.brokers.ibkr_flex import IbkrFlexConnector
-from pa_investing.domain.enums import AssetClass
+from pa_investing.domain.enums import AssetClass, CostBasisStatus
 
 
 def test_ibkr_flex_connector_fetches_report_and_maps_accounts_and_positions() -> None:
@@ -46,6 +46,10 @@ def test_ibkr_flex_connector_fetches_report_and_maps_accounts_and_positions() ->
                         <OpenPosition
                           accountId="U1234567"
                           symbol="SPGI"
+                          localSymbol="SPGI"
+                          conid="4819271"
+                          isin="US78409V1044"
+                          listingExchange="NYSE"
                           description="S&amp;P Global Inc."
                           assetCategory="STK"
                           currency="USD"
@@ -99,9 +103,20 @@ def test_ibkr_flex_connector_fetches_report_and_maps_accounts_and_positions() ->
     assert positions[0].quantity == Decimal("10")
     assert positions[0].average_cost == Decimal("420.5")
     assert positions[0].latest_price == Decimal("510.25")
+    assert positions[0].cost_basis_status == CostBasisStatus.BROKER
+    assert positions[0].instrument.venue == "NYSE"
+    assert {
+        (identifier.identifier_type, identifier.value)
+        for identifier in positions[0].instrument.identifiers
+    } == {
+        ("conid", "4819271"),
+        ("isin", "US78409V1044"),
+        ("local_symbol", "NYSE:SPGI"),
+    }
     assert positions[1].instrument.symbol == "SGLN"
     assert positions[1].instrument.asset_class == AssetClass.ETF
     assert positions[1].instrument.currency == "GBP"
+    assert positions[1].cost_basis_status == CostBasisStatus.BROKER
     assert requests == [
         (
             "GET",
@@ -236,3 +251,10 @@ def test_ibkr_flex_connector_reconstructs_average_cost_from_matching_trades() ->
     }
     assert average_cost_by_symbol["SPGI"] == Decimal("451")
     assert average_cost_by_symbol["MBGL"] == Decimal("0")
+
+    cost_basis_status_by_symbol = {
+        position.instrument.symbol: position.cost_basis_status
+        for position in positions
+    }
+    assert cost_basis_status_by_symbol["SPGI"] == CostBasisStatus.TRADE_RECONSTRUCTED
+    assert cost_basis_status_by_symbol["MBGL"] == CostBasisStatus.UNAVAILABLE

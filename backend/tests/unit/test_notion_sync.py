@@ -1,10 +1,16 @@
 from datetime import UTC, datetime
 from decimal import Decimal
 
-from pa_investing.domain.enums import AssetClass, SignalSeverity, SignalStatus, SignalType
-from pa_investing.domain.models import Instrument, PortfolioSnapshot, Position, Signal
+from pa_investing.domain.enums import (
+    AssetClass,
+    CostBasisStatus,
+    SignalSeverity,
+    SignalStatus,
+    SignalType,
+)
+from pa_investing.domain.models import Account, Instrument, PortfolioSnapshot, Position, Signal
 from pa_investing.notion.client import FakeNotionClient
-from pa_investing.notion.schemas import NotionPropertyValue
+from pa_investing.notion.schemas import NotionDatabaseRow, NotionPropertyValue
 from pa_investing.notion.sync import NotionSync
 from pa_investing.workflows.agent_api import DailyReviewResult
 
@@ -136,3 +142,89 @@ def test_notion_sync_writes_daily_review_payload_to_fake_client() -> None:
     assert stored.properties["Snapshot ID"] == NotionPropertyValue.rich_text("snap-1")
     assert stored.properties["Signal Count"] == NotionPropertyValue.number(0)
     assert "No signals generated." in stored.body
+
+
+def test_notion_sync_reads_portfolio_settings_and_nullable_cost_overrides() -> None:
+    client = FakeNotionClient(
+        configured_databases={"Settings", "Accounts", "Positions"}
+    )
+    client.seed_rows(
+        "Settings",
+        [
+            NotionDatabaseRow(
+                external_id="portfolio-settings",
+                title="Portfolio Settings",
+                properties={"Base Currency": "gbp"},
+            )
+        ],
+    )
+    client.seed_rows(
+        "Positions",
+        [
+            NotionDatabaseRow(
+                external_id="position:acct-1:FREE",
+                title="FREE",
+                properties={"Cost Override": Decimal("0")},
+            ),
+            NotionDatabaseRow(
+                external_id="position:acct-1:AAPL",
+                title="AAPL",
+                properties={"Cost Override": None},
+            ),
+        ],
+    )
+
+    inputs = NotionSync(client).read_portfolio_inputs()
+
+    assert inputs.base_currency == "GBP"
+    assert inputs.cost_overrides == {
+        "position:acct-1:FREE": Decimal("0"),
+        "position:acct-1:AAPL": None,
+    }
+
+
+def test_portfolio_payloads_never_write_user_owned_fields() -> None:
+    client = FakeNotionClient(
+        configured_databases={"Settings", "Accounts", "Positions"}
+    )
+    sync = NotionSync(client)
+    account = Account(
+        account_id="U123",
+        name="IBKR",
+        source="ibkr_flex",
+        base_currency="GBP",
+    )
+    position = Position(
+        account_id="U123",
+        instrument=Instrument(
+            symbol="SGLN",
+            name="iShares Physical Gold ETC",
+            asset_class=AssetClass.ETF,
+            currency="GBP",
+        ),
+        quantity=Decimal("10"),
+        average_cost=Decimal("20"),
+        broker_average_cost=Decimal("19"),
+        manual_average_cost=Decimal("20"),
+        cost_basis_status=CostBasisStatus.MANUAL,
+        broker_cost_basis_status=CostBasisStatus.BROKER,
+        latest_price=Decimal("21"),
+    )
+
+    sync.sync_portfolio([account], [position])
+
+    settings = client.pages["Settings"]["portfolio-settings"]
+    stored_position = client.pages["Positions"]["position:U123:SGLN"]
+    stored_account = client.pages["Accounts"]["account:U123"]
+    assert "Base Currency" not in settings.properties
+    assert stored_position.properties["Market Value"] == NotionPropertyValue.number(
+        Decimal("210")
+    )
+    assert stored_position.properties["Unrealized PnL"] == NotionPropertyValue.number(
+        Decimal("10")
+    )
+    assert {"Cost Override", "Theme", "Notes"}.isdisjoint(
+        stored_position.properties
+    )
+    assert stored_account.properties["Position Count"] == NotionPropertyValue.number(1)
+    assert "GBP: 210" in stored_account.body

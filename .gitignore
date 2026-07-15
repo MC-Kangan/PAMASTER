@@ -4,3 +4,6 @@ __pycache__/
 .pytest_cache/
 .ruff_cache/
 backend/.env
+backend/*.db
+backend/*.db-*
+backend/*.sqlite*

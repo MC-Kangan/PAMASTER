@@ -8,6 +8,9 @@ class Settings(BaseSettings):
     database_url: str = "sqlite+pysqlite:///:memory:"
     notion_enabled: bool = False
     notion_api_key: str = ""
+    notion_settings_database_id: str = ""
+    notion_accounts_database_id: str = ""
+    notion_positions_database_id: str = ""
     notion_signals_database_id: str = ""
     notion_daily_review_database_id: str = ""
     market_data_provider: str = "manual"

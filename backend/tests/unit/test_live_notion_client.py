@@ -405,3 +405,87 @@ def test_live_notion_client_falls_back_to_rich_text_for_number_fields() -> None:
         captured["json"]["properties"]["NAV"]["rich_text"][0]["text"]["content"]
         == "1000"
     )
+
+
+def test_live_notion_client_queries_scalar_rows_and_preserves_empty_number() -> None:
+    schema = {
+        "object": "database",
+        "properties": {
+            "Name": {"id": "title", "type": "title", "title": {}},
+            "External ID": {
+                "id": "external-id",
+                "type": "rich_text",
+                "rich_text": {},
+            },
+            "Cost Override": {
+                "id": "cost-override",
+                "type": "number",
+                "number": {},
+            },
+            "Theme": {"id": "theme", "type": "select", "select": {}},
+        },
+    }
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.method == "GET":
+            return httpx.Response(200, json=schema)
+        return httpx.Response(
+            200,
+            json={
+                "results": [
+                    {
+                        "properties": {
+                            "Name": {
+                                "title": [{"plain_text": "Free Share"}],
+                            },
+                            "External ID": {
+                                "rich_text": [
+                                    {"plain_text": "position:acct-1:FREE"}
+                                ],
+                            },
+                            "Cost Override": {"number": 0},
+                            "Theme": {"select": {"name": "Quality"}},
+                        }
+                    },
+                    {
+                        "properties": {
+                            "Name": {"title": [{"plain_text": "Apple"}]},
+                            "External ID": {
+                                "rich_text": [
+                                    {"plain_text": "position:acct-1:AAPL"}
+                                ],
+                            },
+                            "Cost Override": {"number": None},
+                            "Theme": {"select": None},
+                        }
+                    },
+                ],
+                "has_more": False,
+                "next_cursor": None,
+            },
+        )
+
+    client = LiveNotionClient(
+        api_key="notion-secret",
+        database_ids={"Positions": "positions-db"},
+        transport=httpx.MockTransport(handler),
+    )
+
+    rows = client.query_database("Positions")
+
+    assert rows[0].title == "Free Share"
+    assert rows[0].properties["Cost Override"] == 0
+    assert rows[0].properties["Theme"] == "Quality"
+    assert "Cost Override" in rows[1].properties
+    assert rows[1].properties["Cost Override"] is None
+
+
+def test_live_notion_client_reports_database_configuration() -> None:
+    client = LiveNotionClient(
+        api_key="notion-secret",
+        database_ids={"Positions": "positions-db", "Settings": ""},
+    )
+
+    assert client.is_database_configured("Positions") is True
+    assert client.is_database_configured("Settings") is False
+    assert client.is_database_configured("Accounts") is False

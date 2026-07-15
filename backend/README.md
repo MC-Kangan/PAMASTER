@@ -26,6 +26,7 @@ The backend currently includes:
 - SQLAlchemy repositories and Alembic migrations
 - demo portfolio seeding
 - IBKR Flex Web Service position import for NAS-friendly scheduled reads
+- persistent broker/manual cost-basis separation with explicit reliability status
 - optional IBKR Client Portal Gateway connector for local/manual testing
 - live market data through Alpha Vantage
 - live Notion sync for `Signals` and `Daily Review`
@@ -72,6 +73,9 @@ For the live Phase 2 MVP flow, configure these in `.env`:
 PA_DATABASE_URL=postgresql+psycopg://pa_investing:pa_investing@localhost:5432/pa_investing
 PA_NOTION_ENABLED=true
 PA_NOTION_API_KEY=secret_xxx
+PA_NOTION_SETTINGS_DATABASE_ID=settings_database_id
+PA_NOTION_ACCOUNTS_DATABASE_ID=accounts_database_id
+PA_NOTION_POSITIONS_DATABASE_ID=positions_database_id
 PA_NOTION_SIGNALS_DATABASE_ID=xxxxxxxxxxxxxxxx
 PA_NOTION_DAILY_REVIEW_DATABASE_ID=yyyyyyyyyyyyyyyy
 PA_MARKET_DATA_PROVIDER=alpha_vantage
@@ -91,6 +95,29 @@ PA_NOTION_ENABLED=false
 
 When Notion sync is disabled, the API route still runs but writes only to the fake Notion client in memory.
 
+The portfolio databases are optional as a group. If any of `Settings`, `Accounts`, or
+`Positions` is not configured, portfolio input/output sync is skipped and the existing
+`Signals` and `Daily Review` flow continues.
+
+For the portfolio sync, create these properties. Only the title and `External ID` are required by
+the adapter; the other output columns are written when they exist:
+
+- `Settings`: title, `External ID` (text), `Base Currency` (select: `USD` or `GBP`)
+- `Accounts`: title, `External ID` (text), `Account ID` (text), `Source` (select),
+  `Base Currency` (select), `Position Count` (number), `Currencies` (text)
+- `Positions`: title, `External ID` (text), `Instrument ID` (text), `Symbol` (text),
+  `Venue` (select), `Account` (text), `Asset Class` (select), `Quantity` (number),
+  `Currency` (select), `Price` (number),
+  `Market Value` (number), `Unrealized PnL` (number), `Cost Status` (select),
+  `Effective Cost` (number), `Broker Cost` (number), `Cost Override` (number),
+  `Theme` (select), `Notes` (text)
+
+`Base Currency`, `Cost Override`, `Theme`, and `Notes` are user-owned. Backend upserts do not
+write them. A present empty `Cost Override` clears a stored manual cost, while an explicit zero
+is retained as a valid manual cost. If a Notion read fails, existing settings and overrides are
+left unchanged. Other backend output columns are schema-flexible: compatible properties are
+written when present and ignored when absent.
+
 Outside the test environment, `PA_WORKFLOW_API_TOKEN` is required for the write-trigger
 endpoint. A missing token returns `503` and leaves the trigger closed. Compose enables
 analytics auth by default; enabled analytics auth with a blank username or password also
@@ -103,6 +130,11 @@ Run migrations before starting the app against a fresh database:
 ```bash
 alembic upgrade head
 ```
+
+Migration `0006_instrument_identity` converts legacy symbol primary keys into deterministic
+internal instrument IDs while preserving positions, manual and broker costs, and price history.
+New instruments can carry optional provider identifiers without requiring them, keeping the same
+model usable for equities, ETFs, and future Coinbase crypto products.
 
 Start the API locally:
 
@@ -169,6 +201,12 @@ python -m pa_investing.scripts.import_ibkr_positions --source gateway --gateway-
 
 Gateway is not the recommended NAS path because it relies on an interactive browser login
 and a short-lived session. The import command does not place trades.
+
+The importer stores broker-derived cost independently from a nullable manual override. An explicit
+manual value of zero is valid and is distinguishable from a missing cost. Re-importing IBKR data
+updates the broker value without clearing the override. Clearing the override restores the latest
+broker or reconstructed cost. Until the Notion override reader is implemented in the next slice,
+this behavior is available at the domain and repository layers rather than as a user-facing input.
 
 ## Refresh-And-Sync Workflow Trigger
 

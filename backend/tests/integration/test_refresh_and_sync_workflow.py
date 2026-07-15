@@ -14,18 +14,23 @@ from pa_investing.db.models import (
 )
 from pa_investing.db.repositories import (
     AccountRepository,
+    AppSettingRepository,
     AuditEventRepository,
     PortfolioSnapshotRepository,
     PositionRepository,
     PriceRepository,
     SignalRepository,
 )
-from pa_investing.domain.enums import AssetClass
+from pa_investing.domain.enums import AssetClass, CostBasisStatus
 from pa_investing.domain.models import Account, Instrument, Position, PricePoint
 from pa_investing.market_data.interfaces import MarketDataProvider
-from pa_investing.notion.client import FakeNotionClient
-from pa_investing.notion.schemas import NotionPagePayload, NotionPropertyValue
-from pa_investing.notion.sync import NotionSync
+from pa_investing.notion.client import FakeNotionClient, NotionReadError
+from pa_investing.notion.schemas import (
+    NotionDatabaseRow,
+    NotionPagePayload,
+    NotionPropertyValue,
+)
+from pa_investing.notion.sync import PORTFOLIO_BASE_CURRENCY_KEY, NotionSync
 from pa_investing.workflows.daily_review import DailyReviewPersistence, DailyReviewWorkflow
 from pa_investing.workflows.refresh_and_sync import RefreshAndSyncWorkflow
 
@@ -265,3 +270,141 @@ def test_refresh_and_sync_does_not_call_notion_when_commit_fails(tmp_path) -> No
             workflow.run(stop_prices={"AAPL": Decimal("180")})
 
     assert notion_client.pages == {}
+
+
+def test_refresh_and_sync_applies_and_clears_notion_portfolio_inputs(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    engine = create_engine("sqlite+pysqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    session_factory = sessionmaker(bind=engine)
+    notion_client = FakeNotionClient(
+        configured_databases={
+            "Settings",
+            "Accounts",
+            "Positions",
+            "Signals",
+            "Daily Review",
+        }
+    )
+    notion_client.seed_rows(
+        "Settings",
+        [
+            NotionDatabaseRow(
+                external_id="portfolio-settings",
+                title="Portfolio Settings",
+                properties={"Base Currency": "GBP"},
+            )
+        ],
+    )
+    notion_client.seed_rows(
+        "Positions",
+        [
+            NotionDatabaseRow(
+                external_id="position:U123:FREE",
+                title="FREE",
+                properties={"Cost Override": Decimal("0")},
+            )
+        ],
+    )
+    instrument = Instrument(
+        symbol="FREE",
+        name="Free Signup Share",
+        asset_class=AssetClass.EQUITY,
+        currency="USD",
+    )
+
+    with session_factory() as session:
+        account_repository = AccountRepository(session)
+        position_repository = PositionRepository(session)
+        app_setting_repository = AppSettingRepository(session)
+        account_repository.upsert(
+            Account(
+                account_id="U123",
+                name="IBKR",
+                source="ibkr_flex",
+                base_currency="GBP",
+            )
+        )
+        position_repository.upsert_broker_position(
+            Position(
+                account_id="U123",
+                instrument=instrument,
+                quantity=Decimal("1"),
+                average_cost=Decimal("125"),
+                cost_basis_status=CostBasisStatus.BROKER,
+                latest_price=Decimal("140"),
+            )
+        )
+        session.commit()
+        notion_sync = NotionSync(notion_client)
+        workflow = RefreshAndSyncWorkflow(
+            position_repository=position_repository,
+            price_repository=PriceRepository(session),
+            market_data_provider=FakeMarketDataProvider(
+                {
+                    "FREE": PricePoint(
+                        instrument=instrument,
+                        price=Decimal("145"),
+                        observed_at=datetime(2026, 7, 15, 12, tzinfo=UTC),
+                        provider="manual",
+                    )
+                }
+            ),
+            daily_review_workflow=DailyReviewWorkflow(
+                notion_sync=notion_sync,
+                persistence=DailyReviewPersistence(
+                    audit_event_repository=AuditEventRepository(session),
+                    snapshot_repository=PortfolioSnapshotRepository(session),
+                    signal_repository=SignalRepository(session),
+                ),
+            ),
+            notion_sync=notion_sync,
+            commit=session.commit,
+            account_repository=account_repository,
+            app_setting_repository=app_setting_repository,
+        )
+
+        workflow.run(stop_prices={})
+        overridden = position_repository.list_open_positions()[0]
+
+        assert overridden.average_cost == 0
+        assert overridden.cost_basis_status == CostBasisStatus.MANUAL
+        assert app_setting_repository.get(PORTFOLIO_BASE_CURRENCY_KEY) == "GBP"
+        position_external_id = notion_sync.position_external_id(overridden)
+        position_page = notion_client.pages["Positions"][position_external_id]
+        assert {"Cost Override", "Theme", "Notes"}.isdisjoint(
+            position_page.properties
+        )
+
+        original_query = notion_client.query_database
+
+        def fail_query(database_name: str) -> list[NotionDatabaseRow]:
+            raise NotionReadError(f"failed to read {database_name}")
+
+        monkeypatch.setattr(notion_client, "query_database", fail_query)
+        workflow.run(stop_prices={})
+        retained = position_repository.list_open_positions()[0]
+        assert retained.manual_average_cost == 0
+        assert retained.cost_basis_status == CostBasisStatus.MANUAL
+        monkeypatch.setattr(notion_client, "query_database", original_query)
+
+        notion_client.seed_rows(
+            "Positions",
+            [
+                NotionDatabaseRow(
+                    external_id="position:U123:FREE",
+                    title="FREE",
+                    properties={"Cost Override": None},
+                )
+            ],
+        )
+        workflow.run(stop_prices={})
+        cleared = position_repository.list_open_positions()[0]
+
+    assert cleared.manual_average_cost is None
+    assert cleared.average_cost == Decimal("125")
+    assert cleared.cost_basis_status == CostBasisStatus.BROKER
+    assert "Settings" in notion_client.pages
+    assert "Accounts" in notion_client.pages
+    assert "Positions" in notion_client.pages

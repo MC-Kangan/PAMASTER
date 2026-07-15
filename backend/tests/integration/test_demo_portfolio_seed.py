@@ -7,7 +7,7 @@ from sqlalchemy.orm import sessionmaker
 
 from pa_investing.core.config import Settings
 from pa_investing.db.base import Base
-from pa_investing.db.models import AccountRecord, PositionRecord
+from pa_investing.db.models import AccountRecord, InstrumentRecord, PositionRecord
 from pa_investing.db.repositories import PositionRepository
 from pa_investing.db.session import DatabaseSessionFactory
 from pa_investing.scripts.seed_demo_portfolio import main
@@ -27,13 +27,18 @@ def test_seed_demo_portfolio_loads_account_and_positions() -> None:
         session.commit()
 
         account_ids = session.scalars(select(AccountRecord.account_id)).all()
-        positions = session.scalars(select(PositionRecord)).all()
+        positions = session.execute(
+            select(PositionRecord, InstrumentRecord).join(
+                InstrumentRecord,
+                PositionRecord.instrument_id == InstrumentRecord.instrument_id,
+            )
+        ).all()
 
     assert result.account_id == "pa-demo"
     assert result.positions_loaded == 5
     assert account_ids == ["pa-demo"]
     assert len(positions) == 5
-    assert {position.symbol for position in positions} == {
+    assert {instrument.symbol for _, instrument in positions} == {
         "SPGI",
         "ASML",
         "SAP",

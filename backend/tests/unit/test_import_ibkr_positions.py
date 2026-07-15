@@ -19,6 +19,15 @@ class StubWorkflow:
                     "reason": "unsupported asset class: OPT",
                 }
             ],
+            cost_basis_available=1,
+            cost_basis_missing=1,
+            missing_cost_basis_positions=[
+                {
+                    "account_id": "U1234567",
+                    "symbol": "MBGL",
+                    "reason": "cost basis unavailable",
+                }
+            ],
         )
 
 
@@ -32,6 +41,8 @@ def test_run_ibkr_import_prints_summary(capsys) -> None:
 
     assert "IBKR import completed: accounts=1 positions=2 closed=1 skipped=1" in captured.out
     assert "unsupported asset class: OPT" in captured.out
+    assert "Cost basis: available=1 missing=1" in captured.out
+    assert "missing cost basis U1234567 MBGL" in captured.out
 
 
 def test_run_ibkr_import_uses_flex_connector_when_flex_credentials_are_configured(

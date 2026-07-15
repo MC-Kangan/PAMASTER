@@ -9,6 +9,17 @@ class NotionSchemaError(ValueError):
     pass
 
 
+NotionScalar = str | Decimal | date | None
+
+
+class NotionDatabaseRow(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    external_id: str
+    title: str
+    properties: dict[str, NotionScalar]
+
+
 class NotionDatabaseSchema(BaseModel):
     model_config = ConfigDict(frozen=True)
 

@@ -6,8 +6,13 @@ from xml.etree import ElementTree
 import httpx
 
 from pa_investing.brokers.interfaces import BrokerConnector
-from pa_investing.domain.enums import AssetClass
-from pa_investing.domain.models import Account, Instrument, Position
+from pa_investing.domain.enums import AssetClass, CostBasisStatus
+from pa_investing.domain.models import (
+    Account,
+    Instrument,
+    InstrumentIdentifier,
+    Position,
+)
 
 DEFAULT_IBKR_FLEX_BASE_URL = (
     "https://ndcdyn.interactivebrokers.com/AccountManagement/FlexWebService"
@@ -132,10 +137,10 @@ class IbkrFlexConnector(BrokerConnector):
             quantity = _to_decimal(
                 _first_attr(node, "position", "quantity", "openPosition", default="0")
             )
-            average_cost = _average_cost(
+            average_cost, cost_basis_status = _average_cost(
                 node,
                 quantity,
-                trade_cost_basis.get((account_id, symbol)),
+                trade_cost_basis.get(_position_key(node)),
             )
             latest_price = _optional_decimal(
                 _first_attr(node, "markPrice", "closePrice", "price", default="")
@@ -148,10 +153,19 @@ class IbkrFlexConnector(BrokerConnector):
                         name=_first_attr(node, "description", default=symbol),
                         asset_class=asset_class,
                         currency=_first_attr(node, "currency", default="USD"),
+                        venue=_first_attr(
+                            node,
+                            "listingExchange",
+                            "exchange",
+                            default="",
+                        )
+                        or None,
+                        identifiers=_instrument_identifiers(node),
                     ),
                     quantity=quantity,
                     average_cost=average_cost,
                     latest_price=latest_price,
+                    cost_basis_status=cost_basis_status,
                 )
             )
 
@@ -256,25 +270,60 @@ def _optional_decimal(value: str) -> Decimal | None:
     return _to_decimal(value)
 
 
+def _instrument_identifiers(
+    node: ElementTree.Element,
+) -> tuple[InstrumentIdentifier, ...]:
+    identifiers: list[InstrumentIdentifier] = []
+    conid = _first_attr(node, "conid", "conId")
+    if conid:
+        identifiers.append(
+            InstrumentIdentifier(
+                provider="ibkr",
+                identifier_type="conid",
+                value=conid,
+            )
+        )
+    isin = _first_attr(node, "isin")
+    if isin:
+        identifiers.append(
+            InstrumentIdentifier(
+                provider="ibkr",
+                identifier_type="isin",
+                value=isin,
+            )
+        )
+    local_symbol = _first_attr(node, "localSymbol")
+    if local_symbol:
+        venue = _first_attr(node, "listingExchange", "exchange", default="unknown")
+        identifiers.append(
+            InstrumentIdentifier(
+                provider="ibkr",
+                identifier_type="local_symbol",
+                value=f"{venue}:{local_symbol}",
+            )
+        )
+    return tuple(identifiers)
+
+
 def _average_cost(
     node: ElementTree.Element,
     quantity: Decimal,
     trade_cost_basis: TradeCostBasis | None = None,
-) -> Decimal:
+) -> tuple[Decimal, CostBasisStatus]:
     unit_cost = _first_attr(node, "costBasisPrice", "avgCost", "avgPrice", default="")
     if unit_cost and _to_decimal(unit_cost) != 0:
-        return _to_decimal(unit_cost)
+        return _to_decimal(unit_cost), CostBasisStatus.BROKER
 
     total_cost = _first_attr(node, "costBasisMoney", "costBasis", default="")
     if total_cost and quantity != 0 and _to_decimal(total_cost) != 0:
-        return abs(_to_decimal(total_cost) / quantity)
+        return abs(_to_decimal(total_cost) / quantity), CostBasisStatus.BROKER
 
     if trade_cost_basis is not None:
         average_cost = trade_cost_basis.average_cost(quantity)
         if average_cost is not None:
-            return average_cost
+            return average_cost, CostBasisStatus.TRADE_RECONSTRUCTED
 
-    return Decimal("0")
+    return Decimal("0"), CostBasisStatus.UNAVAILABLE
 
 
 def _trade_cost_basis_by_position(
@@ -295,13 +344,23 @@ def _trade_cost_basis_by_position(
         if not account_id or not symbol:
             continue
 
-        basis = basis_by_position.setdefault((account_id, symbol), TradeCostBasis())
+        basis = basis_by_position.setdefault(_position_key(node), TradeCostBasis())
         basis.quantity += _to_decimal(_first_attr(node, "quantity", "tradeQuantity", default="0"))
         basis.cost += _to_decimal(_first_attr(node, "cost", default="0"))
         basis.commission += _to_decimal(
             _first_attr(node, "ibCommission", "commission", default="0")
         )
     return basis_by_position
+
+
+def _position_key(node: ElementTree.Element) -> tuple[str, str]:
+    account_id = _first_attr(node, "accountId", "fromAccountId")
+    conid = _first_attr(node, "conid", "conId")
+    if conid:
+        return account_id, f"conid:{conid}"
+    symbol = _first_attr(node, "symbol", "underlyingSymbol")
+    venue = _first_attr(node, "listingExchange", "exchange")
+    return account_id, f"listing:{venue}:{symbol}"
 
 
 def _map_asset_class(node: ElementTree.Element) -> AssetClass:

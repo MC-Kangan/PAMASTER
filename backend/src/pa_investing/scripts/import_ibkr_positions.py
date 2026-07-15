@@ -43,6 +43,15 @@ def run_ibkr_import(
         print(
             f"- skipped {skipped['account_id']} {skipped['symbol']}: {skipped['reason']}"
         )
+    print(
+        f"Cost basis: available={result.cost_basis_available} "
+        f"missing={result.cost_basis_missing}"
+    )
+    if result.missing_cost_basis_positions:
+        for missing in result.missing_cost_basis_positions:
+            print(
+                f"- missing cost basis {missing['account_id']} {missing['symbol']}"
+            )
     return result
 
 

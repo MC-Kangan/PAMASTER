@@ -1,17 +1,213 @@
+import logging
+from dataclasses import dataclass, field
 from decimal import Decimal
 
-from pa_investing.analytics.metrics import calculate_exposure_by_asset_class
-from pa_investing.domain.enums import AssetClass
-from pa_investing.domain.models import Position, Signal
+from pa_investing.analytics.metrics import (
+    calculate_exposure_by_asset_class,
+    calculate_exposure_by_currency,
+)
+from pa_investing.domain.enums import AssetClass, CostBasisStatus
+from pa_investing.domain.models import Account, Position, Signal
 from pa_investing.notion.client import NotionClient
 from pa_investing.notion.schemas import NotionPagePayload, NotionPropertyValue
 from pa_investing.presentation.fields import serialize_decimal
 from pa_investing.workflows.agent_api import DailyReviewResult
 
+logger = logging.getLogger(__name__)
+
+PORTFOLIO_DATABASES = frozenset({"Settings", "Accounts", "Positions"})
+PORTFOLIO_BASE_CURRENCY_KEY = "portfolio_base_currency"
+SUPPORTED_BASE_CURRENCIES = frozenset({"USD", "GBP"})
+
+
+@dataclass(frozen=True)
+class PortfolioNotionInputs:
+    base_currency: str | None = None
+    cost_overrides: dict[str, Decimal | None] = field(default_factory=dict)
+    warnings: tuple[str, ...] = ()
+
 
 class NotionSync:
     def __init__(self, client: NotionClient) -> None:
         self.client = client
+
+    def portfolio_databases_configured(self) -> bool:
+        return all(
+            self.client.is_database_configured(database_name)
+            for database_name in PORTFOLIO_DATABASES
+        )
+
+    def read_portfolio_inputs(self) -> PortfolioNotionInputs:
+        if not self.portfolio_databases_configured():
+            return PortfolioNotionInputs()
+
+        warnings: list[str] = []
+        base_currency: str | None = None
+        for row in self.client.query_database("Settings"):
+            if row.external_id != "portfolio-settings":
+                continue
+            raw_currency = row.properties.get("Base Currency")
+            if isinstance(raw_currency, str):
+                normalized = raw_currency.upper().strip()
+                if normalized in SUPPORTED_BASE_CURRENCIES:
+                    base_currency = normalized
+                elif normalized:
+                    warnings.append(
+                        f"Ignored unsupported Notion base currency: {raw_currency}"
+                    )
+            break
+
+        cost_overrides: dict[str, Decimal | None] = {}
+        for row in self.client.query_database("Positions"):
+            if "Cost Override" not in row.properties:
+                continue
+            value = row.properties["Cost Override"]
+            if value is None:
+                cost_overrides[row.external_id] = None
+            elif isinstance(value, Decimal) and value >= 0:
+                cost_overrides[row.external_id] = value
+            else:
+                warnings.append(
+                    f"Ignored invalid cost override for {row.external_id}: {value}"
+                )
+
+        for warning in warnings:
+            logger.warning(warning)
+        return PortfolioNotionInputs(
+            base_currency=base_currency,
+            cost_overrides=cost_overrides,
+            warnings=tuple(warnings),
+        )
+
+    @staticmethod
+    def position_external_id(position: Position) -> str:
+        instrument_reference = (
+            position.instrument.instrument_id or position.instrument.symbol
+        )
+        return f"position:{position.account_id}:{instrument_reference}"
+
+    @staticmethod
+    def account_external_id(account: Account) -> str:
+        return f"account:{account.account_id}"
+
+    def build_settings_payload(self) -> NotionPagePayload:
+        return NotionPagePayload(
+            title="Portfolio Settings",
+            properties={},
+            body=(
+                "Portfolio configuration\n"
+                "Base Currency is managed in Notion. Converted portfolio values "
+                "will be available after FX support is enabled."
+            ),
+        )
+
+    def build_account_payload(
+        self,
+        account: Account,
+        positions: list[Position],
+    ) -> NotionPagePayload:
+        account_positions = [
+            position for position in positions if position.account_id == account.account_id
+        ]
+        exposure = calculate_exposure_by_currency(account_positions)
+        currencies = sorted(exposure)
+        breakdown = [
+            f"- {currency}: {self._format_decimal(value)}"
+            for currency, value in sorted(exposure.items())
+        ] or ["- No open positions."]
+        return NotionPagePayload(
+            title=account.name,
+            properties={
+                "Account ID": NotionPropertyValue.rich_text(account.account_id),
+                "Source": NotionPropertyValue.select(account.source),
+                "Base Currency": NotionPropertyValue.select(account.base_currency),
+                "Position Count": NotionPropertyValue.number(len(account_positions)),
+                "Currencies": NotionPropertyValue.rich_text(", ".join(currencies)),
+            },
+            body="\n".join(
+                [
+                    "Account Overview",
+                    f"- Open Positions: {len(account_positions)}",
+                    f"- Account Base Currency: {account.base_currency}",
+                    "",
+                    "Market Value by Currency",
+                    *breakdown,
+                    "",
+                    "Values are not combined until portfolio FX conversion is enabled.",
+                ]
+            ),
+        )
+
+    def build_position_payload(self, position: Position) -> NotionPagePayload:
+        properties = {
+            "Symbol": NotionPropertyValue.rich_text(position.instrument.symbol),
+            "Account": NotionPropertyValue.rich_text(position.account_id),
+            "Asset Class": NotionPropertyValue.select(
+                position.instrument.asset_class.value
+            ),
+            "Quantity": NotionPropertyValue.number(position.quantity),
+            "Currency": NotionPropertyValue.select(position.instrument.currency),
+            "Market Value": NotionPropertyValue.number(position.market_value),
+            "Cost Status": NotionPropertyValue.select(position.cost_basis_status.value),
+            "Effective Cost": NotionPropertyValue.number(position.average_cost),
+            "Broker Cost": NotionPropertyValue.number(
+                position.broker_average_cost or Decimal("0")
+            ),
+        }
+        if position.instrument.instrument_id is not None:
+            properties["Instrument ID"] = NotionPropertyValue.rich_text(
+                position.instrument.instrument_id
+            )
+        if position.instrument.venue is not None:
+            properties["Venue"] = NotionPropertyValue.select(
+                position.instrument.venue
+            )
+        if position.latest_price is not None:
+            properties["Price"] = NotionPropertyValue.number(position.latest_price)
+        if position.cost_basis_status != CostBasisStatus.UNAVAILABLE:
+            properties["Unrealized PnL"] = NotionPropertyValue.number(
+                position.unrealized_pnl
+            )
+
+        return NotionPagePayload(
+            title=position.instrument.symbol,
+            properties=properties,
+            body="\n".join(
+                [
+                    "Position Overview",
+                    f"- Account: {position.account_id}",
+                    f"- Instrument: {position.instrument.name}",
+                    f"- Quantity: {self._format_decimal(position.quantity)}",
+                    f"- Currency: {position.instrument.currency}",
+                    f"- Cost Status: {self._humanize_token(position.cost_basis_status.value)}",
+                ]
+            ),
+        )
+
+    def sync_portfolio(
+        self,
+        accounts: list[Account],
+        positions: list[Position],
+    ) -> None:
+        if not self.portfolio_databases_configured():
+            return
+        self.client.upsert_page(
+            "Settings",
+            "portfolio-settings",
+            self.build_settings_payload(),
+        )
+        for account in accounts:
+            self.client.upsert_page(
+                "Accounts",
+                self.account_external_id(account),
+                self.build_account_payload(account, positions),
+            )
+        for position in positions:
+            self.client.upsert_page(
+                "Positions",
+                self.position_external_id(position),
+                self.build_position_payload(position),
+            )
 
     def build_signal_payload(self, signal: Signal) -> NotionPagePayload:
         return NotionPagePayload(

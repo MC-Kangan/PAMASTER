@@ -26,3 +26,10 @@ class SignalStatus(StrEnum):
     REVIEW_REQUESTED = "review_requested"
     REVIEWED = "reviewed"
     DISMISSED = "dismissed"
+
+
+class CostBasisStatus(StrEnum):
+    MANUAL = "manual"
+    BROKER = "broker"
+    TRADE_RECONSTRUCTED = "trade_reconstructed"
+    UNAVAILABLE = "unavailable"

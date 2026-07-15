@@ -84,6 +84,9 @@ def test_ibkr_connector_lists_accounts_and_fetches_supported_positions() -> None
     assert positions[0].instrument.asset_class == AssetClass.EQUITY
     assert positions[0].average_cost == Decimal("420.5")
     assert positions[0].latest_price == Decimal("510.25")
+    assert positions[0].instrument.identifiers[0].provider == "ibkr"
+    assert positions[0].instrument.identifiers[0].identifier_type == "conid"
+    assert positions[0].instrument.identifiers[0].value == "265598"
     assert positions[1].instrument.symbol == "SGLN"
     assert positions[1].instrument.asset_class == AssetClass.ETF
     assert positions[1].instrument.currency == "GBP"

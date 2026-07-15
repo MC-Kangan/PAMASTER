@@ -1,5 +1,7 @@
 from collections.abc import Mapping, Set
 from datetime import UTC, datetime, timedelta
+from decimal import Decimal
+from uuid import NAMESPACE_URL, uuid5
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -7,17 +9,26 @@ from sqlalchemy.orm import Session
 from pa_investing.audit.events import AuditEvent
 from pa_investing.db.models import (
     AccountRecord,
+    AppSettingRecord,
     AuditEventRecord,
+    InstrumentIdentifierRecord,
     InstrumentRecord,
     PortfolioSnapshotRecord,
     PositionRecord,
     PriceRecord,
     SignalRecord,
 )
-from pa_investing.domain.enums import AssetClass, SignalSeverity, SignalStatus, SignalType
+from pa_investing.domain.enums import (
+    AssetClass,
+    CostBasisStatus,
+    SignalSeverity,
+    SignalStatus,
+    SignalType,
+)
 from pa_investing.domain.models import (
     Account,
     Instrument,
+    InstrumentIdentifier,
     PortfolioSnapshot,
     Position,
     PricePoint,
@@ -25,13 +36,146 @@ from pa_investing.domain.models import (
 )
 
 
-def _instrument_from_record(record: InstrumentRecord) -> Instrument:
+def _instrument_from_record(
+    record: InstrumentRecord,
+    identifiers: tuple[InstrumentIdentifier, ...] = (),
+) -> Instrument:
     return Instrument(
+        instrument_id=record.instrument_id,
         symbol=record.symbol,
         name=record.name,
         asset_class=AssetClass(record.asset_class),
         currency=record.currency,
+        venue=record.venue or None,
+        identifiers=identifiers,
     )
+
+
+def _canonical_instrument_id(instrument: Instrument) -> str:
+    identity = "|".join(
+        (
+            "pa-investing-instrument",
+            instrument.instrument_id or "",
+            instrument.symbol,
+            instrument.asset_class.value,
+            instrument.currency,
+            instrument.venue or "",
+        )
+    )
+    return str(uuid5(NAMESPACE_URL, identity))
+
+
+def _instrument_identifiers(
+    session: Session,
+    instrument_id: str,
+) -> tuple[InstrumentIdentifier, ...]:
+    rows = session.scalars(
+        select(InstrumentIdentifierRecord)
+        .where(InstrumentIdentifierRecord.instrument_id == instrument_id)
+        .order_by(
+            InstrumentIdentifierRecord.provider,
+            InstrumentIdentifierRecord.identifier_type,
+        )
+    ).all()
+    return tuple(
+        InstrumentIdentifier(
+            provider=row.provider,
+            identifier_type=row.identifier_type,
+            value=row.value,
+        )
+        for row in rows
+    )
+
+
+def _resolve_instrument_record(
+    session: Session,
+    instrument: Instrument,
+) -> InstrumentRecord:
+    record: InstrumentRecord | None = None
+    if instrument.instrument_id:
+        record = session.get(InstrumentRecord, instrument.instrument_id)
+
+    for identifier in instrument.identifiers:
+        identifier_record = session.scalar(
+            select(InstrumentIdentifierRecord).where(
+                InstrumentIdentifierRecord.provider == identifier.provider,
+                InstrumentIdentifierRecord.identifier_type
+                == identifier.identifier_type,
+                InstrumentIdentifierRecord.value == identifier.value,
+            )
+        )
+        if identifier_record is None:
+            continue
+        matched = session.get(InstrumentRecord, identifier_record.instrument_id)
+        if (
+            record is not None
+            and matched is not None
+            and matched.instrument_id != record.instrument_id
+        ):
+            raise ValueError("instrument identifiers resolve to different instruments")
+        record = matched
+
+    if record is None:
+        record = session.scalar(
+            select(InstrumentRecord).where(
+                InstrumentRecord.symbol == instrument.symbol,
+                InstrumentRecord.asset_class == instrument.asset_class.value,
+                InstrumentRecord.currency == instrument.currency,
+                InstrumentRecord.venue == (instrument.venue or ""),
+            )
+        )
+
+    if record is None:
+        record = InstrumentRecord(
+            instrument_id=instrument.instrument_id
+            or _canonical_instrument_id(instrument),
+            symbol=instrument.symbol,
+            name=instrument.name,
+            asset_class=instrument.asset_class.value,
+            currency=instrument.currency,
+            venue=instrument.venue or "",
+        )
+        session.add(record)
+    else:
+        record.symbol = instrument.symbol
+        record.name = instrument.name
+        record.asset_class = instrument.asset_class.value
+        record.currency = instrument.currency
+        record.venue = instrument.venue or ""
+
+    for identifier in instrument.identifiers:
+        existing = session.scalar(
+            select(InstrumentIdentifierRecord).where(
+                InstrumentIdentifierRecord.provider == identifier.provider,
+                InstrumentIdentifierRecord.identifier_type
+                == identifier.identifier_type,
+                InstrumentIdentifierRecord.value == identifier.value,
+            )
+        )
+        if existing is not None:
+            if existing.instrument_id != record.instrument_id:
+                raise ValueError("provider identifier is already assigned")
+            continue
+        same_type = session.scalar(
+            select(InstrumentIdentifierRecord).where(
+                InstrumentIdentifierRecord.instrument_id == record.instrument_id,
+                InstrumentIdentifierRecord.provider == identifier.provider,
+                InstrumentIdentifierRecord.identifier_type
+                == identifier.identifier_type,
+            )
+        )
+        if same_type is None:
+            session.add(
+                InstrumentIdentifierRecord(
+                    instrument_id=record.instrument_id,
+                    provider=identifier.provider,
+                    identifier_type=identifier.identifier_type,
+                    value=identifier.value,
+                )
+            )
+        else:
+            same_type.value = identifier.value
+    return record
 
 
 def _normalize_utc_timestamp(value: datetime) -> datetime:
@@ -57,44 +201,131 @@ class AccountRepository:
         record.source = account.source
         record.base_currency = account.base_currency
 
+    def list_all(self) -> list[Account]:
+        rows = self.session.scalars(select(AccountRecord).order_by(AccountRecord.account_id)).all()
+        return [
+            Account(
+                account_id=row.account_id,
+                name=row.name,
+                source=row.source,
+                base_currency=row.base_currency,
+            )
+            for row in rows
+        ]
+
+
+class AppSettingRepository:
+    def __init__(self, session: Session) -> None:
+        self.session = session
+
+    def get(self, key: str, default: str | None = None) -> str | None:
+        record = self.session.get(AppSettingRecord, key)
+        return record.value if record is not None else default
+
+    def set(self, key: str, value: str) -> None:
+        record = self.session.get(AppSettingRecord, key)
+        if record is None:
+            record = AppSettingRecord(key=key, value=value)
+            self.session.add(record)
+        record.value = value
+
 
 class PositionRepository:
     def __init__(self, session: Session) -> None:
         self.session = session
 
     def upsert(self, position: Position) -> None:
-        self._upsert_instrument(position.instrument)
-        stmt = select(PositionRecord).where(
-            PositionRecord.account_id == position.account_id,
-            PositionRecord.symbol == position.instrument.symbol,
-        )
-        record = self.session.scalar(stmt)
+        instrument_record = _resolve_instrument_record(self.session, position.instrument)
+        record = self._find_record(position.account_id, instrument_record.instrument_id)
         if record is None:
             record = PositionRecord(
                 account_id=position.account_id,
-                symbol=position.instrument.symbol,
+                instrument_id=instrument_record.instrument_id,
             )
             self.session.add(record)
         record.quantity = position.quantity
-        record.average_cost = position.average_cost
         record.latest_price = position.latest_price
+        record.broker_average_cost = (
+            position.broker_average_cost
+            if position.broker_average_cost is not None
+            else position.average_cost
+        )
+        broker_status = position.broker_cost_basis_status
+        if broker_status is None:
+            broker_status = (
+                CostBasisStatus.UNAVAILABLE
+                if position.cost_basis_status == CostBasisStatus.MANUAL
+                else position.cost_basis_status
+            )
+        record.broker_cost_basis_status = broker_status.value
+        record.manual_average_cost = position.manual_average_cost
+        self._apply_effective_cost(record)
+
+    def upsert_broker_position(self, position: Position) -> Position:
+        instrument_record = _resolve_instrument_record(self.session, position.instrument)
+        record = self._find_record(position.account_id, instrument_record.instrument_id)
+        if record is None:
+            record = PositionRecord(
+                account_id=position.account_id,
+                instrument_id=instrument_record.instrument_id,
+            )
+            self.session.add(record)
+        record.quantity = position.quantity
+        record.latest_price = position.latest_price
+        record.broker_average_cost = position.average_cost
+        record.broker_cost_basis_status = position.cost_basis_status.value
+        self._apply_effective_cost(record)
+        return self._position_from_record(
+            record,
+            _instrument_from_record(
+                instrument_record,
+                _instrument_identifiers(self.session, instrument_record.instrument_id),
+            ),
+        )
+
+    def set_manual_average_cost(
+        self,
+        account_id: str,
+        instrument_reference: str,
+        value: Decimal | None,
+    ) -> Position:
+        if value is not None and value < 0:
+            raise ValueError("manual average cost cannot be negative")
+        record = self._find_position_by_reference(account_id, instrument_reference)
+        if record is None:
+            raise KeyError(f"position not found: {account_id} {instrument_reference}")
+        instrument_record = self.session.get(InstrumentRecord, record.instrument_id)
+        if instrument_record is None:
+            raise KeyError(f"instrument not found: {record.instrument_id}")
+        record.manual_average_cost = value
+        self._apply_effective_cost(record)
+        return self._position_from_record(
+            record,
+            _instrument_from_record(
+                instrument_record,
+                _instrument_identifiers(self.session, instrument_record.instrument_id),
+            ),
+        )
 
     def list_open_positions(self) -> list[Position]:
         stmt = select(PositionRecord, InstrumentRecord).join(
             InstrumentRecord,
-            PositionRecord.symbol == InstrumentRecord.symbol,
+            PositionRecord.instrument_id == InstrumentRecord.instrument_id,
         ).where(
             PositionRecord.quantity != 0,
         )
         positions: list[Position] = []
         for position_record, instrument_record in self.session.execute(stmt).all():
             positions.append(
-                Position(
-                    account_id=position_record.account_id,
-                    instrument=_instrument_from_record(instrument_record),
-                    quantity=position_record.quantity,
-                    average_cost=position_record.average_cost,
-                    latest_price=position_record.latest_price,
+                self._position_from_record(
+                    position_record,
+                    _instrument_from_record(
+                        instrument_record,
+                        _instrument_identifiers(
+                            self.session,
+                            instrument_record.instrument_id,
+                        ),
+                    ),
                 )
             )
         return positions
@@ -102,7 +333,7 @@ class PositionRepository:
     def close_positions_missing_from_snapshot(
         self,
         account_ids: Set[str],
-        symbols_by_account: Mapping[str, Set[str]],
+        instrument_ids_by_account: Mapping[str, Set[str]],
     ) -> int:
         if not account_ids:
             return 0
@@ -113,21 +344,75 @@ class PositionRepository:
         records = self.session.scalars(stmt).all()
         closed = 0
         for record in records:
-            imported_symbols = symbols_by_account.get(record.account_id, set())
-            if record.symbol in imported_symbols:
+            imported_instrument_ids = instrument_ids_by_account.get(
+                record.account_id,
+                set(),
+            )
+            if record.instrument_id in imported_instrument_ids:
                 continue
             record.quantity = 0
             closed += 1
         return closed
 
-    def _upsert_instrument(self, instrument: Instrument) -> None:
-        record = self.session.get(InstrumentRecord, instrument.symbol)
-        if record is None:
-            record = InstrumentRecord(symbol=instrument.symbol, name=instrument.name)
-            self.session.add(record)
-        record.name = instrument.name
-        record.asset_class = instrument.asset_class.value
-        record.currency = instrument.currency
+    def _find_record(
+        self,
+        account_id: str,
+        instrument_id: str,
+    ) -> PositionRecord | None:
+        return self.session.scalar(
+            select(PositionRecord).where(
+                PositionRecord.account_id == account_id,
+                PositionRecord.instrument_id == instrument_id,
+            )
+        )
+
+    def _find_position_by_reference(
+        self,
+        account_id: str,
+        instrument_reference: str,
+    ) -> PositionRecord | None:
+        direct = self._find_record(account_id, instrument_reference)
+        if direct is not None:
+            return direct
+        matches = self.session.scalars(
+            select(PositionRecord)
+            .join(
+                InstrumentRecord,
+                PositionRecord.instrument_id == InstrumentRecord.instrument_id,
+            )
+            .where(
+                PositionRecord.account_id == account_id,
+                InstrumentRecord.symbol == instrument_reference.upper(),
+            )
+        ).all()
+        if len(matches) > 1:
+            raise ValueError(
+                "symbol is ambiguous; use the internal instrument id instead"
+            )
+        return matches[0] if matches else None
+
+    @staticmethod
+    def _apply_effective_cost(record: PositionRecord) -> None:
+        if record.manual_average_cost is not None:
+            record.average_cost = record.manual_average_cost
+            record.cost_basis_status = CostBasisStatus.MANUAL.value
+            return
+        record.average_cost = record.broker_average_cost
+        record.cost_basis_status = record.broker_cost_basis_status
+
+    @staticmethod
+    def _position_from_record(record: PositionRecord, instrument: Instrument) -> Position:
+        return Position(
+            account_id=record.account_id,
+            instrument=instrument,
+            quantity=record.quantity,
+            average_cost=record.average_cost,
+            latest_price=record.latest_price,
+            cost_basis_status=CostBasisStatus(record.cost_basis_status),
+            broker_average_cost=record.broker_average_cost,
+            broker_cost_basis_status=CostBasisStatus(record.broker_cost_basis_status),
+            manual_average_cost=record.manual_average_cost,
+        )
 
 
 class PriceRepository:
@@ -135,26 +420,20 @@ class PriceRepository:
         self.session = session
 
     def upsert(self, price_point: PricePoint) -> None:
-        instrument = price_point.instrument
-        instrument_record = self.session.get(InstrumentRecord, instrument.symbol)
-        if instrument_record is None:
-            instrument_record = InstrumentRecord(
-                symbol=instrument.symbol,
-                name=instrument.name,
-                asset_class=instrument.asset_class.value,
-                currency=instrument.currency,
-            )
-            self.session.add(instrument_record)
+        instrument_record = _resolve_instrument_record(
+            self.session,
+            price_point.instrument,
+        )
 
         stmt = select(PriceRecord).where(
-            PriceRecord.symbol == instrument.symbol,
+            PriceRecord.instrument_id == instrument_record.instrument_id,
             PriceRecord.observed_at == _normalize_utc_timestamp(price_point.observed_at),
             PriceRecord.provider == price_point.provider,
         )
         record = self.session.scalar(stmt)
         if record is None:
             record = PriceRecord(
-                symbol=instrument.symbol,
+                instrument_id=instrument_record.instrument_id,
                 observed_at=_normalize_utc_timestamp(price_point.observed_at),
                 provider=price_point.provider,
             )
@@ -162,25 +441,43 @@ class PriceRepository:
         record.price = price_point.price
 
     def latest_prices(self) -> Mapping[str, PricePoint]:
+        by_instrument_id = self.latest_prices_by_instrument_id()
+        by_symbol: dict[str, PricePoint] = {}
+        for point in by_instrument_id.values():
+            symbol = point.instrument.symbol
+            if symbol in by_symbol:
+                raise ValueError(
+                    f"multiple instruments use symbol {symbol}; use internal ids"
+                )
+            by_symbol[symbol] = point
+        return by_symbol
+
+    def latest_prices_by_instrument_id(self) -> Mapping[str, PricePoint]:
         rows = self.session.execute(
             select(PriceRecord, InstrumentRecord).join(
                 InstrumentRecord,
-                PriceRecord.symbol == InstrumentRecord.symbol,
+                PriceRecord.instrument_id == InstrumentRecord.instrument_id,
             )
         ).all()
         latest: dict[str, tuple[PriceRecord, InstrumentRecord]] = {}
         for price_record, instrument_record in rows:
-            current = latest.get(price_record.symbol)
+            current = latest.get(price_record.instrument_id)
             if current is None or price_record.observed_at > current[0].observed_at:
-                latest[price_record.symbol] = (price_record, instrument_record)
+                latest[price_record.instrument_id] = (price_record, instrument_record)
         return {
-            symbol: PricePoint(
-                instrument=_instrument_from_record(instrument_record),
+            instrument_id: PricePoint(
+                instrument=_instrument_from_record(
+                    instrument_record,
+                    _instrument_identifiers(
+                        self.session,
+                        instrument_record.instrument_id,
+                    ),
+                ),
                 price=price_record.price,
                 observed_at=_normalize_utc_timestamp(price_record.observed_at),
                 provider=price_record.provider,
             )
-            for symbol, (price_record, instrument_record) in latest.items()
+            for instrument_id, (price_record, instrument_record) in latest.items()
         }
 
 

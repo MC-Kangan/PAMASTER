@@ -2,7 +2,7 @@ from decimal import Decimal
 from pathlib import Path
 
 from pa_investing.brokers.csv_importer import CsvPositionImporter
-from pa_investing.domain.enums import AssetClass
+from pa_investing.domain.enums import AssetClass, CostBasisStatus
 
 
 def test_csv_position_importer_maps_rows_to_positions() -> None:
@@ -16,6 +16,8 @@ def test_csv_position_importer_maps_rows_to_positions() -> None:
     assert positions[0].instrument.asset_class == AssetClass.EQUITY
     assert positions[0].quantity == Decimal("10")
     assert positions[0].latest_price == Decimal("175")
+    assert positions[0].manual_average_cost == Decimal("150")
+    assert positions[0].cost_basis_status == CostBasisStatus.MANUAL
 
 
 def test_csv_position_importer_rejects_missing_columns(tmp_path: Path) -> None:

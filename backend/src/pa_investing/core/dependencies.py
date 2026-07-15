@@ -6,6 +6,8 @@ from fastapi import Depends
 
 from pa_investing.core.config import Settings
 from pa_investing.db.repositories import (
+    AccountRepository,
+    AppSettingRepository,
     AuditEventRepository,
     PortfolioSnapshotRepository,
     PositionRepository,
@@ -49,6 +51,9 @@ def get_notion_client(
     return LiveNotionClient(
         api_key=settings.notion_api_key,
         database_ids={
+            "Settings": settings.notion_settings_database_id,
+            "Accounts": settings.notion_accounts_database_id,
+            "Positions": settings.notion_positions_database_id,
             "Signals": settings.notion_signals_database_id,
             "Daily Review": settings.notion_daily_review_database_id,
         },
@@ -79,6 +84,8 @@ def get_refresh_and_sync_workflow(
             ),
             notion_sync=notion_sync,
             commit=session.commit,
+            account_repository=AccountRepository(session),
+            app_setting_repository=AppSettingRepository(session),
         )
 
 

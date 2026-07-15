@@ -3,6 +3,7 @@ from dataclasses import dataclass
 
 from pa_investing.brokers.interfaces import BrokerConnector
 from pa_investing.db.repositories import AccountRepository, PositionRepository
+from pa_investing.domain.enums import CostBasisStatus
 from pa_investing.domain.models import Account
 
 
@@ -12,6 +13,9 @@ class BrokerImportResult:
     positions_imported: int
     positions_closed: int
     skipped_positions: list[dict[str, str]]
+    cost_basis_available: int = 0
+    cost_basis_missing: int = 0
+    missing_cost_basis_positions: list[dict[str, str]] | None = None
 
 
 class BrokerImportWorkflow:
@@ -34,12 +38,7 @@ class BrokerImportWorkflow:
             raise RuntimeError("IBKR import returned no supported accounts or positions")
 
         accounts_by_id = {account.account_id: account for account in accounts}
-        imported_symbols_by_account: dict[str, set[str]] = {}
-
         for position in positions:
-            imported_symbols_by_account.setdefault(position.account_id, set()).add(
-                position.instrument.symbol
-            )
             if position.account_id not in accounts_by_id:
                 accounts_by_id[position.account_id] = Account(
                     account_id=position.account_id,
@@ -50,18 +49,48 @@ class BrokerImportWorkflow:
 
         for account in accounts_by_id.values():
             self.account_repository.upsert(account)
-        for position in positions:
-            self.position_repository.upsert(position)
+        effective_positions = [
+            self.position_repository.upsert_broker_position(position)
+            for position in positions
+        ]
+        imported_instrument_ids_by_account: dict[str, set[str]] = {}
+        for position in effective_positions:
+            instrument_id = position.instrument.instrument_id
+            if instrument_id is None:
+                raise RuntimeError("persisted instrument is missing its internal id")
+            imported_instrument_ids_by_account.setdefault(
+                position.account_id,
+                set(),
+            ).add(instrument_id)
 
         positions_closed = self.position_repository.close_positions_missing_from_snapshot(
             set(accounts_by_id),
-            imported_symbols_by_account,
+            imported_instrument_ids_by_account,
         )
         self.commit()
+
+        cost_basis_available = 0
+        cost_basis_missing = 0
+        missing_cost_basis_positions: list[dict[str, str]] = []
+        for position in effective_positions:
+            if position.cost_basis_status == CostBasisStatus.UNAVAILABLE:
+                cost_basis_missing += 1
+                missing_cost_basis_positions.append(
+                    {
+                        "account_id": position.account_id,
+                        "symbol": position.instrument.symbol,
+                        "reason": "cost basis unavailable",
+                    }
+                )
+            else:
+                cost_basis_available += 1
 
         return BrokerImportResult(
             accounts_imported=len(accounts_by_id),
             positions_imported=len(positions),
             positions_closed=positions_closed,
             skipped_positions=getattr(self.connector, "last_skipped_positions", []),
+            cost_basis_available=cost_basis_available,
+            cost_basis_missing=cost_basis_missing,
+            missing_cost_basis_positions=missing_cost_basis_positions or None,
         )
