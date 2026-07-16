@@ -145,6 +145,10 @@ class YahooHistoricalDataProvider:
                 name: self._decimal(row[name], name)
                 for name in ("Open", "High", "Low", "Close")
             }
+            if raw_values["High"] < max(raw_values.values()) or raw_values[
+                "Low"
+            ] > min(raw_values.values()):
+                continue
             trading_date = pd.Timestamp(index).date()
             volume = self._optional_decimal(row.get("Volume"))
             dividend = self._optional_decimal(row.get("Dividends")) or Decimal("0")
@@ -174,6 +178,12 @@ class YahooHistoricalDataProvider:
                     split_ratio=split,
                     adjustment_mode=AdjustmentMode.ALL,
                 )
+            )
+
+        if not adjusted_bars:
+            raise HistoricalProviderError(
+                code="empty_response",
+                message=f"Yahoo returned no valid daily bars for {symbol}",
             )
 
         return HistoricalDataset(

@@ -168,3 +168,28 @@ def test_yahoo_ignores_provider_placeholder_rows_with_missing_prices() -> None:
     dataset = provider.fetch_daily(_request())
 
     assert [bar.trading_date for bar in dataset.bars] == [date(2026, 7, 13)]
+
+
+def test_yahoo_ignores_isolated_provider_rows_with_invalid_ohlc() -> None:
+    provider = YahooHistoricalDataProvider(
+        downloader=lambda **kwargs: pd.DataFrame(
+            {
+                "Open": [100.0, 110.0],
+                "High": [105.0, 115.0],
+                "Low": [95.0, 111.0],
+                "Close": [101.0, 114.0],
+                "Adj Close": [101.0, 114.0],
+                "Volume": [1000, 1200],
+            },
+            index=pd.to_datetime(["2026-07-13", "2026-07-14"]),
+        ),
+        metadata_loader=lambda symbol: {
+            "symbol": symbol,
+            "currency": "GBP",
+            "exchange": "LSE",
+        },
+    )
+
+    dataset = provider.fetch_daily(_request())
+
+    assert [bar.trading_date for bar in dataset.bars] == [date(2026, 7, 13)]
