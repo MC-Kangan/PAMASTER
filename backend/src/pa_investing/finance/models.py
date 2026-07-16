@@ -68,9 +68,7 @@ class AnalysisRequest(BaseModel):
     lookback_days: int = Field(default=365, ge=1)
     bundle: str = "daily_market_review.v1"
     skill_ids: tuple[str, ...] = ()
-    threshold_overrides: dict[str, dict[str, Decimal]] = Field(
-        default_factory=dict
-    )
+    threshold_overrides: dict[str, dict[str, Decimal]] = Field(default_factory=dict)
 
     @field_validator("bundle")
     @classmethod

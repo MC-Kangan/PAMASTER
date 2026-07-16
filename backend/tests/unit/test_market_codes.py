@@ -1,8 +1,8 @@
 import pytest
 
 from pa_investing.instruments.market_codes import (
-    CanonicalInstrumentReference,
     DEFAULT_MARKET_CODES,
+    CanonicalInstrumentReference,
 )
 
 

@@ -1,4 +1,5 @@
 from collections.abc import Sequence
+from contextlib import suppress
 from decimal import Decimal
 from typing import Protocol, Self
 
@@ -14,8 +15,8 @@ from pa_investing.db.models import (
 from pa_investing.db.repositories import HistoricalDataRepository
 from pa_investing.domain.enums import InstrumentScope
 from pa_investing.instruments.market_codes import (
-    CanonicalInstrumentReference,
     DEFAULT_MARKET_CODES,
+    CanonicalInstrumentReference,
 )
 from pa_investing.market_data.history.models import HistoricalInstrumentRef
 
@@ -102,17 +103,13 @@ class InstrumentResolutionService:
                 InstrumentIdentifierRecord.instrument_id == instrument_id
             )
         ).all()
-        provider_symbols = {
-            mapping.provider: mapping.provider_symbol for mapping in mappings
-        }
+        provider_symbols = {mapping.provider: mapping.provider_symbol for mapping in mappings}
         provider_exchanges = {
             mapping.provider: mapping.provider_exchange
             for mapping in mappings
             if mapping.provider_exchange
         }
-        provider_currencies = {
-            mapping.provider: mapping.expected_currency for mapping in mappings
-        }
+        provider_currencies = {mapping.provider: mapping.expected_currency for mapping in mappings}
         provider_price_multipliers = {
             mapping.provider: mapping.price_multiplier for mapping in mappings
         }
@@ -141,10 +138,8 @@ class InstrumentResolutionService:
         exchange_filter = tokens[1] if len(tokens) > 1 else None
         market_filter: str | None = None
         if exchange_filter:
-            try:
+            with suppress(ValueError):
                 market_filter = DEFAULT_MARKET_CODES.normalize(exchange_filter)
-            except ValueError:
-                pass
         merged: dict[tuple[str, str, str, str], InstrumentCandidate] = {}
         for searcher in self.searchers:
             for candidate in searcher.search(query):
@@ -153,9 +148,7 @@ class InstrumentResolutionService:
                 if exchange_filter:
                     if market_filter:
                         if (
-                            DEFAULT_MARKET_CODES.market_for_exchange(
-                                candidate.exchange
-                            )
+                            DEFAULT_MARKET_CODES.market_for_exchange(candidate.exchange)
                             != market_filter
                         ):
                             continue

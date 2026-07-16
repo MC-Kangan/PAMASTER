@@ -3,8 +3,8 @@ from decimal import Decimal
 
 import httpx
 
-from pa_investing.instruments.resolution import InstrumentCandidate
 from pa_investing.instruments.market_codes import DEFAULT_MARKET_CODES
+from pa_investing.instruments.resolution import InstrumentCandidate
 
 YahooSearch = Callable[[str], list[dict[str, object]]]
 
@@ -53,32 +53,22 @@ class YahooInstrumentSearcher:
             )
             market_code = DEFAULT_MARKET_CODES.market_for_exchange(exchange)
             display_symbol = (
-                DEFAULT_MARKET_CODES.display_symbol(symbol, market_code)
-                if market_code
-                else symbol
+                DEFAULT_MARKET_CODES.display_symbol(symbol, market_code) if market_code else symbol
             )
             candidates.append(
                 InstrumentCandidate(
                     display_symbol=display_symbol,
-                    name=str(
-                        result.get("shortname")
-                        or result.get("longname")
-                        or symbol
-                    ),
+                    name=str(result.get("shortname") or result.get("longname") or symbol),
                     asset_class=_asset_class(result.get("quoteType")),
                     currency=currency,
                     exchange=exchange,
                     mic_code=None,
                     provider_symbols={self.provider_name: symbol},
                     provider_exchanges=(
-                        {self.provider_name: provider_exchange}
-                        if provider_exchange
-                        else {}
+                        {self.provider_name: provider_exchange} if provider_exchange else {}
                     ),
                     provider_currencies={self.provider_name: currency},
-                    provider_price_multipliers={
-                        self.provider_name: Decimal("1")
-                    },
+                    provider_price_multipliers={self.provider_name: Decimal("1")},
                     confidence=Decimal("0.8"),
                 )
             )
@@ -148,13 +138,9 @@ class TwelveDataInstrumentSearcher:
                     exchange=exchange or None,
                     mic_code=str(result.get("mic_code") or "") or None,
                     provider_symbols={self.provider_name: symbol},
-                    provider_exchanges=(
-                        {self.provider_name: exchange} if exchange else {}
-                    ),
+                    provider_exchanges=({self.provider_name: exchange} if exchange else {}),
                     provider_currencies={self.provider_name: currency},
-                    provider_price_multipliers={
-                        self.provider_name: Decimal("1")
-                    },
+                    provider_price_multipliers={self.provider_name: Decimal("1")},
                     confidence=Decimal("0.8"),
                 )
             )

@@ -19,9 +19,7 @@ class MarketCodeRegistry:
             for alias in {*item.aliases, item.code}
         }
         self._exchanges = {
-            exchange.upper(): item.code
-            for item in definitions
-            for exchange in item.exchanges
+            exchange.upper(): item.code for item in definitions for exchange in item.exchanges
         }
 
     @staticmethod

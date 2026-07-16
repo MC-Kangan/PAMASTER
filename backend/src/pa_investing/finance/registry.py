@@ -20,9 +20,7 @@ class SkillRegistry:
         normalized = name.strip().lower()
         if normalized in self._bundles:
             raise ValueError(f"bundle already registered: {normalized}")
-        self._bundles[normalized] = tuple(
-            skill_id.strip().lower() for skill_id in skill_ids
-        )
+        self._bundles[normalized] = tuple(skill_id.strip().lower() for skill_id in skill_ids)
 
     def get(self, skill_id: str) -> FinanceSkill:
         normalized = skill_id.strip().lower()

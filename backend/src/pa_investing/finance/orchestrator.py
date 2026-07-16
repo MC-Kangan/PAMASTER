@@ -19,9 +19,7 @@ class FinanceOrchestrator:
         dataset: HistoricalDataset,
     ) -> AnalysisResult:
         skill_ids = (
-            request.skill_ids
-            if request.skill_ids
-            else self.registry.resolve_bundle(request.bundle)
+            request.skill_ids if request.skill_ids else self.registry.resolve_bundle(request.bundle)
         )
         results: list[SkillResult] = []
         summary: list[str] = []
@@ -39,17 +37,12 @@ class FinanceOrchestrator:
             results.append(result)
             for finding in result.findings:
                 summary.append(
-                    f"[{finding.severity.value.upper()}] "
-                    f"{skill.metadata.name}: {finding.summary}"
+                    f"[{finding.severity.value.upper()}] {skill.metadata.name}: {finding.summary}"
                 )
             for warning in result.warnings:
-                summary.append(
-                    f"[WARNING] {skill.metadata.name}: {warning}"
-                )
+                summary.append(f"[WARNING] {skill.metadata.name}: {warning}")
             if result.status is SkillStatus.FAILED:
-                summary.append(
-                    f"[WARNING] {skill.metadata.name} analysis unavailable."
-                )
+                summary.append(f"[WARNING] {skill.metadata.name} analysis unavailable.")
 
         statuses = {result.status for result in results}
         if statuses == {SkillStatus.SUCCESS}:

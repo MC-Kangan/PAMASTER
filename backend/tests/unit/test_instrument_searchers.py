@@ -27,9 +27,7 @@ def test_yahoo_searcher_normalizes_listing_and_preserves_provider_venue() -> Non
     assert candidates[0].exchange == "NASDAQ"
     assert candidates[0].provider_symbols == {"yahoo": "NVDA"}
     assert candidates[0].provider_exchanges == {"yahoo": "NMS"}
-    assert candidates[0].provider_price_multipliers == {
-        "yahoo": Decimal("1")
-    }
+    assert candidates[0].provider_price_multipliers == {"yahoo": Decimal("1")}
 
 
 def test_yahoo_searcher_uses_provider_symbol_only_for_provider_mapping() -> None:
