@@ -1,5 +1,5 @@
 from collections.abc import Mapping, Set
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from uuid import NAMESPACE_URL, uuid5
 
@@ -13,6 +13,9 @@ from pa_investing.db.models import (
     AuditEventRecord,
     BrokerReconciliationRecord,
     FxRateRecord,
+    HistoricalDailyBarRecord,
+    HistoricalDatasetRecord,
+    HistoricalSeriesRecord,
     InstrumentIdentifierRecord,
     InstrumentRecord,
     MarketDataMappingRecord,
@@ -47,6 +50,11 @@ from pa_investing.domain.models import (
     ProviderRun,
     Signal,
     Transaction,
+)
+from pa_investing.market_data.history.models import (
+    DailyBar,
+    HistoricalDataset,
+    HistoricalInstrumentRef,
 )
 
 
@@ -242,6 +250,199 @@ class AppSettingRepository:
             record = AppSettingRecord(key=key, value=value)
             self.session.add(record)
         record.value = value
+
+
+class HistoricalDataRepository:
+    def __init__(self, session: Session) -> None:
+        self.session = session
+
+    def save_dataset(
+        self,
+        instrument: HistoricalInstrumentRef,
+        dataset: HistoricalDataset,
+    ) -> HistoricalDataset:
+        if dataset.series_key == "":
+            raise ValueError("dataset series_key cannot be empty")
+        if not dataset.bars:
+            raise ValueError("historical dataset cannot be empty")
+        if self.session.get(HistoricalDatasetRecord, dataset.dataset_id) is not None:
+            raise ValueError(f"historical dataset already exists: {dataset.dataset_id}")
+
+        now = datetime.now(UTC)
+        series = self.session.get(HistoricalSeriesRecord, dataset.series_key)
+        provider_identity = {
+            "symbols": instrument.provider_symbols,
+            "exchanges": instrument.provider_exchanges,
+            "ids": instrument.provider_ids,
+        }
+        if series is None:
+            series = HistoricalSeriesRecord(
+                series_key=dataset.series_key,
+                instrument_id=instrument.instrument_id,
+                scope=instrument.scope.value,
+                display_symbol=instrument.display_symbol,
+                asset_class=instrument.asset_class,
+                currency=instrument.currency,
+                exchange=instrument.exchange,
+                provider_identity_json=provider_identity,
+                active_dataset_id=None,
+                created_at=now,
+                updated_at=now,
+            )
+            self.session.add(series)
+        else:
+            self._validate_series_identity(series, instrument)
+            series.provider_identity_json = provider_identity
+            series.updated_at = now
+
+        dataset_record = HistoricalDatasetRecord(
+            dataset_id=dataset.dataset_id,
+            series_key=dataset.series_key,
+            provider=dataset.provider,
+            provider_symbol=dataset.provider_symbol,
+            provider_exchange=dataset.provider_exchange,
+            currency=dataset.currency,
+            start_date=dataset.bars[0].trading_date,
+            end_date=dataset.bars[-1].trading_date,
+            fetched_at=dataset.fetched_at,
+            adjustment_mode=dataset.bars[0].adjustment_mode.value,
+            unadjusted_mode=(
+                dataset.unadjusted_bars[0].adjustment_mode.value
+                if dataset.unadjusted_bars
+                else None
+            ),
+            warnings_json=dataset.warnings,
+        )
+        self.session.add(dataset_record)
+        self.session.flush()
+
+        for bar in (*dataset.bars, *(dataset.unadjusted_bars or [])):
+            self.session.add(self._bar_record(dataset.dataset_id, bar))
+        self.session.flush()
+
+        series.active_dataset_id = dataset.dataset_id
+        series.updated_at = now
+        self.session.flush()
+        return dataset
+
+    def get_dataset(self, dataset_id: str) -> HistoricalDataset:
+        record = self.session.get(HistoricalDatasetRecord, dataset_id)
+        if record is None:
+            raise KeyError(f"historical dataset not found: {dataset_id}")
+        bars = self.session.scalars(
+            select(HistoricalDailyBarRecord)
+            .where(HistoricalDailyBarRecord.dataset_id == dataset_id)
+            .order_by(
+                HistoricalDailyBarRecord.trading_date,
+                HistoricalDailyBarRecord.adjustment_mode,
+            )
+        ).all()
+        adjusted = [
+            self._bar_from_record(bar)
+            for bar in bars
+            if bar.adjustment_mode == record.adjustment_mode
+        ]
+        unadjusted = (
+            [
+                self._bar_from_record(bar)
+                for bar in bars
+                if bar.adjustment_mode == record.unadjusted_mode
+            ]
+            if record.unadjusted_mode
+            else None
+        )
+        return HistoricalDataset(
+            dataset_id=record.dataset_id,
+            series_key=record.series_key,
+            provider=record.provider,
+            provider_symbol=record.provider_symbol,
+            provider_exchange=record.provider_exchange,
+            currency=record.currency,
+            fetched_at=record.fetched_at,
+            bars=adjusted,
+            unadjusted_bars=unadjusted,
+            warnings=list(record.warnings_json),
+        )
+
+    def latest_covering(
+        self,
+        series_key: str,
+        start_date: date,
+        end_date: date,
+    ) -> HistoricalDataset | None:
+        series = self.session.get(HistoricalSeriesRecord, series_key)
+        if series is None or series.active_dataset_id is None:
+            return None
+        dataset = self.session.get(HistoricalDatasetRecord, series.active_dataset_id)
+        if (
+            dataset is None
+            or dataset.start_date > start_date
+            or dataset.end_date < end_date
+        ):
+            return None
+        return self.get_dataset(dataset.dataset_id)
+
+    def latest(self, series_key: str) -> HistoricalDataset | None:
+        series = self.session.get(HistoricalSeriesRecord, series_key)
+        if series is None or series.active_dataset_id is None:
+            return None
+        return self.get_dataset(series.active_dataset_id)
+
+    def promote_series(self, *, series_key: str, instrument_id: str) -> None:
+        series = self.session.get(HistoricalSeriesRecord, series_key)
+        if series is None:
+            raise KeyError(f"historical series not found: {series_key}")
+        instrument = self.session.get(InstrumentRecord, instrument_id)
+        if instrument is None:
+            raise KeyError(f"instrument not found: {instrument_id}")
+        if instrument.currency != series.currency:
+            raise ValueError("instrument currency does not match historical series")
+        if series.exchange and instrument.venue and instrument.venue != series.exchange:
+            raise ValueError("instrument venue does not match historical series")
+        series.instrument_id = instrument_id
+        series.updated_at = datetime.now(UTC)
+        self.session.flush()
+
+    @staticmethod
+    def _validate_series_identity(
+        series: HistoricalSeriesRecord,
+        instrument: HistoricalInstrumentRef,
+    ) -> None:
+        if (
+            series.currency != instrument.currency
+            or series.exchange != instrument.exchange
+            or series.display_symbol != instrument.display_symbol
+        ):
+            raise ValueError("historical series identity does not match instrument")
+
+    @staticmethod
+    def _bar_record(dataset_id: str, bar: DailyBar) -> HistoricalDailyBarRecord:
+        return HistoricalDailyBarRecord(
+            dataset_id=dataset_id,
+            trading_date=bar.trading_date,
+            adjustment_mode=bar.adjustment_mode.value,
+            open=bar.open,
+            high=bar.high,
+            low=bar.low,
+            close=bar.close,
+            volume=bar.volume,
+            dividend=bar.dividend,
+            split_ratio=bar.split_ratio,
+        )
+
+    @staticmethod
+    def _bar_from_record(record: HistoricalDailyBarRecord) -> DailyBar:
+        return DailyBar(
+            trading_date=record.trading_date,
+            adjustment_mode=record.adjustment_mode,
+            open=record.open,
+            high=record.high,
+            low=record.low,
+            close=record.close,
+            volume=record.volume,
+            dividend=record.dividend,
+            split_ratio=record.split_ratio,
+        )
 
 
 class PositionRepository:

@@ -1,7 +1,17 @@
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from decimal import Decimal
 
-from sqlalchemy import DateTime, ForeignKey, Numeric, String, TypeDecorator, UniqueConstraint, text
+from sqlalchemy import (
+    JSON,
+    Date,
+    DateTime,
+    ForeignKey,
+    Numeric,
+    String,
+    TypeDecorator,
+    UniqueConstraint,
+    text,
+)
 from sqlalchemy.orm import Mapped, mapped_column
 
 from pa_investing.db.base import Base
@@ -335,3 +345,75 @@ class ProviderRunRecord(Base):
     records_written: Mapped[int] = mapped_column(nullable=False, default=0)
     warning_count: Mapped[int] = mapped_column(nullable=False, default=0)
     error_message: Mapped[str | None] = mapped_column(String(2048), nullable=True)
+
+
+class HistoricalSeriesRecord(Base):
+    __tablename__ = "historical_series"
+
+    series_key: Mapped[str] = mapped_column(String(512), primary_key=True)
+    instrument_id: Mapped[str | None] = mapped_column(
+        ForeignKey("instruments.instrument_id"),
+        nullable=True,
+    )
+    scope: Mapped[str] = mapped_column(String(32), nullable=False)
+    display_symbol: Mapped[str] = mapped_column(String(64), nullable=False)
+    asset_class: Mapped[str] = mapped_column(String(32), nullable=False)
+    currency: Mapped[str] = mapped_column(String(8), nullable=False)
+    exchange: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    provider_identity_json: Mapped[dict[str, object]] = mapped_column(
+        JSON,
+        nullable=False,
+        default=dict,
+    )
+    active_dataset_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)
+
+
+class HistoricalDatasetRecord(Base):
+    __tablename__ = "historical_datasets"
+
+    dataset_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    series_key: Mapped[str] = mapped_column(
+        ForeignKey("historical_series.series_key"),
+        nullable=False,
+        index=True,
+    )
+    provider: Mapped[str] = mapped_column(String(64), nullable=False)
+    provider_symbol: Mapped[str] = mapped_column(String(128), nullable=False)
+    provider_exchange: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    currency: Mapped[str] = mapped_column(String(8), nullable=False)
+    start_date: Mapped[date] = mapped_column(Date(), nullable=False)
+    end_date: Mapped[date] = mapped_column(Date(), nullable=False)
+    fetched_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)
+    adjustment_mode: Mapped[str] = mapped_column(String(32), nullable=False)
+    unadjusted_mode: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    warnings_json: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
+
+
+class HistoricalDailyBarRecord(Base):
+    __tablename__ = "historical_daily_bars"
+    __table_args__ = (
+        UniqueConstraint(
+            "dataset_id",
+            "trading_date",
+            "adjustment_mode",
+            name="uq_historical_bar_dataset_date_mode",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    dataset_id: Mapped[str] = mapped_column(
+        ForeignKey("historical_datasets.dataset_id"),
+        nullable=False,
+        index=True,
+    )
+    trading_date: Mapped[date] = mapped_column(Date(), nullable=False)
+    adjustment_mode: Mapped[str] = mapped_column(String(32), nullable=False)
+    open: Mapped[Decimal] = mapped_column(Numeric(24, 10), nullable=False)
+    high: Mapped[Decimal] = mapped_column(Numeric(24, 10), nullable=False)
+    low: Mapped[Decimal] = mapped_column(Numeric(24, 10), nullable=False)
+    close: Mapped[Decimal] = mapped_column(Numeric(24, 10), nullable=False)
+    volume: Mapped[Decimal | None] = mapped_column(Numeric(30, 8), nullable=True)
+    dividend: Mapped[Decimal] = mapped_column(Numeric(24, 10), nullable=False)
+    split_ratio: Mapped[Decimal] = mapped_column(Numeric(24, 10), nullable=False)
