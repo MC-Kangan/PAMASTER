@@ -37,6 +37,8 @@ The backend currently includes:
 - responsive browser performance page shell
 - fixed snapshot cadence definition at `00:00`, `06:00`, `12:00`, `18:00`
 - one-shot scheduled snapshot command for NAS or host schedulers
+- persisted daily historical data with Yahoo-to-Twelve-Data whole-series fallback
+- reusable portfolio and standalone research instrument resolution
 
 ## Backend Structure
 
@@ -49,7 +51,8 @@ Main package layout under [src/pa_investing](src/pa_investing/):
 - `core/`: config and dependency wiring
 - `db/`: ORM models, repositories, session factory
 - `domain/`: core business models and enums
-- `market_data/`: provider interface and implementations
+- `instruments/`: portfolio mappings and research candidate resolution
+- `market_data/`: quote providers plus persisted daily-history routing
 - `notion/`: Notion client and sync layer
 - `scripts/`: CLI entrypoints
 - `seeds/`: reusable seeding helpers
@@ -146,6 +149,10 @@ model usable for equities, ETFs, and future Coinbase crypto products.
 
 Migration `0007_quotes_fx_reporting` adds provider mappings, quote metadata, FX observations,
 and reporting-coverage fields.
+
+Migration `0009_historical_market_data` adds immutable historical series, dataset versions, and
+daily bars. A series points to its active validated dataset; promotion from research to a
+permanent instrument links the existing data instead of copying or refetching it.
 
 Start the API locally:
 
@@ -260,6 +267,66 @@ explicit.
 IBKR Flex `CashReportCurrency` rows are imported as provider-neutral cash positions such as
 `CASH.GBP`. This keeps the domain model compatible with future brokers while allowing cash to be
 included in account totals, portfolio weights, and the allocation chart.
+
+## Daily Historical Data
+
+Install the normal project dependencies and configure `PA_TWELVE_DATA_API_KEY` to enable the
+fallback provider. Yahoo is the primary provider and Twelve Data is the mapped fallback.
+
+Portfolio history requires explicit rows in `market_data_mappings`. Yahoo mappings usually carry
+the Yahoo ticker suffix, while Twelve Data mappings may include an exchange, provider currency,
+and unit multiplier:
+
+```csv
+instrument_id,provider,provider_symbol,provider_exchange,expected_currency,price_multiplier,enabled
+your-sgln-id,yahoo,SGLN.L,,GBP,1,true
+your-sgln-id,twelve_data,SGLN,LSE,GBX,0.01,true
+```
+
+The router evaluates each provider for the complete requested window. A timeout, malformed
+payload, listing mismatch, invalid OHLC relationship, wrong adjustment mode, or incomplete
+boundary coverage rejects that provider and records the reason before trying the next one.
+Accepted datasets never combine bars from multiple providers.
+
+The default analysis bars are adjusted for splits and dividends. Yahoo raw OHLC and Twelve Data
+`adjust=none` bars are retained as companion series. Adjustment mode, provider, symbol, exchange,
+currency, fetch time, warnings, and every failed attempt remain visible to consumers.
+
+Use an internal instrument ID for portfolio data:
+
+```bash
+python -m pa_investing.scripts.fetch_historical_data \
+  --instrument-id your-instrument-id \
+  --start 2025-01-01 \
+  --end 2025-12-31
+```
+
+Use research mode for discovery:
+
+```bash
+python -m pa_investing.scripts.fetch_historical_data \
+  --research "NVDA" \
+  --start 2025-01-01 \
+  --end 2025-12-31
+```
+
+Ambiguous research queries print candidate listings and exit with code `2`; all-provider failure
+exits with code `1`. A successful request prints dataset ID, provider, coverage, adjustment modes,
+warnings, and stale status. Add `--allow-stale` only for workflows such as daily review that may
+explicitly reuse the last validated dataset.
+
+The HTTP equivalents are:
+
+- `GET /analysis/instruments/search?q=NVDA`
+- `GET /analysis/market-data/{instrument_id}?start=2025-01-01&end=2025-12-31`
+- `POST /analysis/market-data/research`
+
+Application routes, agents, and skills must call `HistoricalDataService`. They must not call
+Yahoo, Twelve Data, SQLAlchemy repositories, or fallback logic directly. This keeps analysis
+reproducible and ensures validation and provenance cannot be bypassed.
+
+The implementation was written independently. Vibe-Trading was used as a design reference for
+small provider contracts and boundary validation; no substantial upstream source code was copied.
 
 ## Refresh-And-Sync Workflow Trigger
 

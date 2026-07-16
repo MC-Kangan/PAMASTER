@@ -24,6 +24,7 @@ The project has:
 - completed the Notion portfolio settings/accounts/positions backend slice
 - completed the general internal instrument identity backend slice
 - completed the mapped quote, FX, and reporting-currency backend slice
+- completed the reusable daily historical-data routing foundation
 
 In practical terms, the repo can now:
 
@@ -49,6 +50,9 @@ In practical terms, the repo can now:
 - protect browser analytics routes with a simple auth gate
 - support a private NAS deployment model using Tailscale, HTTPS, and application authentication
 - provide a NAS-runnable command for the fixed snapshot cadence
+- fetch, validate, persist, and reuse daily historical bars for portfolio and research use
+- fall back from Yahoo to Twelve Data without stitching providers into one series
+- preserve adjusted and least-adjusted bar provenance with explicit stale-data behavior
 
 ## What Has Been Implemented
 
@@ -167,6 +171,27 @@ Implemented:
 Live Twelve Data validation is complete for the currently mapped portfolio. Unsupported listings
 continue to use their timestamped IBKR Flex marks and are labelled as fallbacks.
 
+### Historical Data Library
+
+The reusable daily-history layer lives under `pa_investing.market_data.history`. It is shared by
+the PA application, local scripts, and future agent or skill consumers.
+
+Its current contract is deliberately narrow:
+
+- daily bars only
+- provider order: Yahoo, then Twelve Data
+- one complete provider series per dataset; bars are never silently stitched
+- split-and-dividend-adjusted OHLC is the default analysis series
+- the least-adjusted provider series is retained when available
+- portfolio requests use internal instrument IDs and explicit provider mappings
+- research requests use candidate resolution and return ambiguity instead of guessing a listing
+- accepted datasets are immutable, versioned, persisted, and reused
+- analysis fails closed when all providers fail
+- stale data is returned only when the caller explicitly opts in
+
+IBKR TWS/Gateway historical data is intentionally not part of this slice. It remains a separate,
+optional overlay so the NAS and research library do not depend on a logged-in IBKR session.
+
 ## Code Structure
 
 The main application code lives in [backend/src/pa_investing](backend/src/pa_investing/).
@@ -208,6 +233,10 @@ High-level layout:
   - Alpha Vantage provider
   - Twelve Data provider
   - mapped quote selection
+  - persisted daily-history contracts, validation, routing, and providers
+- `instruments/`
+  - strict portfolio resolution
+  - standalone research candidate resolution
 - `notion/`
   - client interfaces
   - live Notion adapter
@@ -261,6 +290,9 @@ Implemented routes:
 - `GET /analysis/current`
 - `GET /analysis/transactions`
 - `GET /analysis/operations`
+- `GET /analysis/instruments/search?q={query}`
+- `GET /analysis/market-data/{instrument_id}?start=YYYY-MM-DD&end=YYYY-MM-DD`
+- `POST /analysis/market-data/research`
 - `POST /workflows/refresh-and-sync`
 
 ## What Still Needs To Be Done For The First Real Notion MVP
