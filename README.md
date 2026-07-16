@@ -231,6 +231,15 @@ result = service.analyze_portfolio(
 )
 ```
 
+The standalone smoke-test command runs the same default bundle:
+
+```bash
+cd backend
+.venv/bin/python -m pa_investing.scripts.analyze_instrument \
+  --research "ADBE US" \
+  --as-of 2026-07-15
+```
+
 The default lookback is 365 calendar days. Callers may select explicit skill IDs, override
 validated thresholds, or register additional deterministic or model-assisted skills through
 `SkillRegistry`. Skill failures are isolated and produce a partial analysis with structured
