@@ -7,6 +7,7 @@ from pa_investing.instruments.market_codes import DEFAULT_MARKET_CODES
 from pa_investing.instruments.resolution import InstrumentCandidate
 
 YahooSearch = Callable[[str], list[dict[str, object]]]
+YahooMetadataLoader = Callable[[str], dict[str, object]]
 
 YAHOO_EXCHANGE_ALIASES = {
     "NMS": "NASDAQ",
@@ -52,8 +53,13 @@ def _asset_class(value: object) -> str:
 class YahooInstrumentSearcher:
     provider_name = "yahoo"
 
-    def __init__(self, search: YahooSearch | None = None) -> None:
+    def __init__(
+        self,
+        search: YahooSearch | None = None,
+        metadata_loader: YahooMetadataLoader | None = None,
+    ) -> None:
         self._search = search or self._default_search
+        self._metadata_loader = metadata_loader or self._default_metadata
 
     def search(self, query: str) -> list[InstrumentCandidate]:
         try:
@@ -63,9 +69,24 @@ class YahooInstrumentSearcher:
         candidates: list[InstrumentCandidate] = []
         for result in results:
             symbol = str(result.get("symbol") or "").strip()
-            currency = str(result.get("currency") or "").strip()
-            provider_exchange = str(result.get("exchange") or "").strip().upper()
-            if not symbol or not currency:
+            if not symbol:
+                continue
+            metadata: dict[str, object] = {}
+            if not result.get("currency") or not result.get("exchange"):
+                try:
+                    metadata = self._metadata_loader(symbol)
+                except Exception:
+                    metadata = {}
+            currency = str(
+                result.get("currency") or metadata.get("currency") or ""
+            ).strip()
+            provider_exchange = str(
+                result.get("exchange")
+                or metadata.get("exchange")
+                or metadata.get("exchangeName")
+                or ""
+            ).strip().upper()
+            if not currency:
                 continue
             exchange = YAHOO_EXCHANGE_ALIASES.get(
                 provider_exchange,
@@ -98,6 +119,21 @@ class YahooInstrumentSearcher:
 
         quotes = yf.Search(query, max_results=25).quotes
         return [quote for quote in quotes if isinstance(quote, dict)]
+
+    @staticmethod
+    def _default_metadata(symbol: str) -> dict[str, object]:
+        import yfinance as yf
+
+        ticker = yf.Ticker(symbol)
+        metadata = dict(ticker.get_history_metadata() or {})
+        if metadata.get("currency"):
+            return metadata
+        fast_info = ticker.fast_info
+        return {
+            **metadata,
+            "currency": fast_info.get("currency"),
+            "exchange": fast_info.get("exchange"),
+        }
 
 
 class TwelveDataInstrumentSearcher:

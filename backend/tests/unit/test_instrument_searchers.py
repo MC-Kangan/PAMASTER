@@ -50,6 +50,45 @@ def test_yahoo_searcher_uses_provider_symbol_only_for_provider_mapping() -> None
     assert candidate.provider_symbols == {"yahoo": "GLEN.L"}
 
 
+def test_yahoo_searcher_enriches_missing_currency_from_metadata() -> None:
+    searcher = YahooInstrumentSearcher(
+        search=lambda _query: [
+            {
+                "symbol": "ADBE",
+                "shortname": "Adobe Inc.",
+                "quoteType": "EQUITY",
+                "exchange": "NMS",
+            }
+        ],
+        metadata_loader=lambda symbol: {
+            "symbol": symbol,
+            "currency": "USD",
+            "exchangeName": "NMS",
+        },
+    )
+
+    candidate = searcher.search("ADBE")[0]
+
+    assert candidate.canonical_reference == "ADBE US"
+    assert candidate.currency == "USD"
+    assert candidate.provider_symbols == {"yahoo": "ADBE"}
+
+
+def test_yahoo_searcher_skips_result_when_required_metadata_is_unavailable() -> None:
+    searcher = YahooInstrumentSearcher(
+        search=lambda _query: [
+            {
+                "symbol": "ADBE",
+                "quoteType": "EQUITY",
+                "exchange": "NMS",
+            }
+        ],
+        metadata_loader=lambda _symbol: {},
+    )
+
+    assert searcher.search("ADBE") == []
+
+
 def test_twelve_data_searcher_parses_candidates_and_error_envelopes() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         assert request.headers["Authorization"] == "apikey test-key"
