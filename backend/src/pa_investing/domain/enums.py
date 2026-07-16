@@ -67,3 +67,20 @@ class ProviderRunStatus(StrEnum):
     RUNNING = "running"
     SUCCESS = "success"
     FAILED = "failed"
+
+
+class AdjustmentMode(StrEnum):
+    NONE = "none"
+    SPLITS = "splits"
+    ALL = "all"
+
+
+class InstrumentScope(StrEnum):
+    PORTFOLIO = "portfolio"
+    RESEARCH = "research"
+
+
+class HistoricalDatasetStatus(StrEnum):
+    VALID = "valid"
+    REJECTED = "rejected"
+    STALE = "stale"
