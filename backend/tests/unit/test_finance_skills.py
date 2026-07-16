@@ -1,6 +1,8 @@
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 
+import pytest
+
 from pa_investing.domain.enums import AdjustmentMode, InstrumentScope
 from pa_investing.finance.defaults import build_default_finance_registry
 from pa_investing.finance.models import (
@@ -89,6 +91,69 @@ def test_technical_snapshot_omits_findings_when_history_is_insufficient() -> Non
     assert result.status is SkillStatus.PARTIAL
     assert result.findings == []
     assert "requires at least 50 completed daily bars" in result.warnings[0]
+
+
+def test_technical_snapshot_uses_none_for_unavailable_finite_metrics() -> None:
+    bars = [_bar(index, Decimal("100")).model_copy(update={"volume": None}) for index in range(50)]
+
+    result = TechnicalSnapshotSkill().run(_request(), _dataset(bars))
+
+    assert result.status is SkillStatus.SUCCESS
+    assert result.metrics["adx_14"] is None
+    assert result.metrics["volume_ratio_20"] is None
+
+
+def test_skill_rejects_unknown_threshold_override() -> None:
+    request = _request().model_copy(
+        update={
+            "threshold_overrides": {"technical_snapshot.v1": {"invented_threshold": Decimal("1")}}
+        }
+    )
+
+    with pytest.raises(ValueError, match="unknown threshold"):
+        TechnicalSnapshotSkill().run(
+            request,
+            _dataset([_bar(index, Decimal("100") + Decimal(index)) for index in range(80)]),
+        )
+
+
+def test_skill_rejects_invalid_threshold_ordering() -> None:
+    request = _request().model_copy(
+        update={
+            "threshold_overrides": {
+                "technical_snapshot.v1": {
+                    "rsi_oversold": Decimal("80"),
+                    "rsi_overbought": Decimal("70"),
+                }
+            }
+        }
+    )
+
+    with pytest.raises(ValueError, match="RSI thresholds"):
+        TechnicalSnapshotSkill().run(
+            request,
+            _dataset(
+                [
+                    _bar(index, Decimal("100") + Decimal(index))
+                    for index in range(80)
+                ]
+            ),
+        )
+
+
+def test_analysis_request_rejects_unsupported_asset_class() -> None:
+    with pytest.raises(ValueError, match="equities and ETFs"):
+        AnalysisRequest(
+            instrument=HistoricalInstrumentRef(
+                scope=InstrumentScope.RESEARCH,
+                display_symbol="BTC-USD",
+                asset_class="crypto",
+                currency="USD",
+                exchange="COINBASE",
+                provider_symbols={"yahoo": "BTC-USD"},
+            ),
+            as_of=date(2026, 7, 15),
+        )
 
 
 def test_candlestick_events_surfaces_only_recent_patterns() -> None:

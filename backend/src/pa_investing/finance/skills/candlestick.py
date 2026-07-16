@@ -49,10 +49,11 @@ class CandlestickEventsSkill:
                 metrics={"bar_count": len(bars)},
                 warnings=["Candlestick analysis requires at least two completed daily bars."],
             )
-        thresholds = {
-            **self.metadata.default_thresholds,
-            **request.threshold_overrides.get(self.metadata.skill_id, {}),
-        }
+        thresholds = self.metadata.resolve_thresholds(
+            request.threshold_overrides.get(self.metadata.skill_id, {})
+        )
+        if not Decimal("0") <= thresholds["doji_body_ratio"] <= Decimal("1"):
+            raise ValueError("doji body ratio must be between 0 and 1")
         patterns = self._detect(bars, thresholds["doji_body_ratio"])
         recent_start = bars[-5].trading_date if len(bars) >= 5 else bars[0].trading_date
         recent = [pattern for pattern in patterns if pattern.observed_on >= recent_start]

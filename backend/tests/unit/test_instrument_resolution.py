@@ -11,8 +11,10 @@ from pa_investing.instruments.resolution import (
 class StubSearcher:
     def __init__(self, candidates: list[InstrumentCandidate]) -> None:
         self.candidates = candidates
+        self.queries: list[str] = []
 
     def search(self, query: str) -> list[InstrumentCandidate]:
+        self.queries.append(query)
         return self.candidates
 
 
@@ -115,31 +117,50 @@ def test_research_search_returns_ambiguity_until_listing_is_selected() -> None:
 
 
 def test_research_search_accepts_bloomberg_style_market_code() -> None:
+    searcher = StubSearcher(
+        [
+            _candidate(
+                symbol="ADBE",
+                exchange="NASDAQ",
+                provider="yahoo",
+                provider_symbol="ADBE",
+            ),
+            _candidate(
+                symbol="ADBE",
+                exchange="LSE",
+                provider="yahoo",
+                provider_symbol="0R2Y.L",
+                currency="GBP",
+            ),
+        ]
+    )
     service = InstrumentResolutionService(
         session=None,
-        searchers=[
-            StubSearcher(
-                [
-                    _candidate(
-                        symbol="ADBE",
-                        exchange="NASDAQ",
-                        provider="yahoo",
-                        provider_symbol="ADBE",
-                    ),
-                    _candidate(
-                        symbol="ADBE",
-                        exchange="LSE",
-                        provider="yahoo",
-                        provider_symbol="0R2Y.L",
-                        currency="GBP",
-                    ),
-                ]
-            )
-        ],
+        searchers=[searcher],
     )
 
     result = service.search("adbe us")
 
+    assert searcher.queries == ["ADBE"]
     assert result.unambiguous is True
     assert result.candidates[0].canonical_reference == "ADBE US"
     assert result.candidates[0].model_dump()["canonical_reference"] == "ADBE US"
+
+
+def test_market_code_resolution_falls_back_to_mic() -> None:
+    candidate = _candidate(
+        symbol="GLEN",
+        exchange="London Stock Exchange",
+        provider="twelve_data",
+        provider_symbol="GLEN",
+        currency="GBP",
+    ).model_copy(update={"mic_code": "XLON"})
+    service = InstrumentResolutionService(
+        session=None,
+        searchers=[StubSearcher([candidate])],
+    )
+
+    result = service.search("GLEN LN")
+
+    assert result.unambiguous is True
+    assert result.candidates[0].canonical_reference == "GLEN LN"

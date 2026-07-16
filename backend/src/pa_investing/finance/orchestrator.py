@@ -1,3 +1,5 @@
+from datetime import date
+
 from pa_investing.finance.models import (
     AnalysisRequest,
     AnalysisResult,
@@ -6,7 +8,10 @@ from pa_investing.finance.models import (
     SkillStatus,
 )
 from pa_investing.finance.registry import SkillRegistry
-from pa_investing.market_data.history.models import HistoricalDataset
+from pa_investing.market_data.history.models import (
+    HistoricalDataset,
+    ProviderAttempt,
+)
 
 
 class FinanceOrchestrator:
@@ -17,14 +22,36 @@ class FinanceOrchestrator:
         self,
         request: AnalysisRequest,
         dataset: HistoricalDataset,
+        *,
+        completed_through: date | None = None,
+        stale: bool = False,
+        data_warnings: tuple[str, ...] = (),
+        provider_attempts: tuple[ProviderAttempt, ...] = (),
     ) -> AnalysisResult:
         skill_ids = (
             request.skill_ids if request.skill_ids else self.registry.resolve_bundle(request.bundle)
         )
         results: list[SkillResult] = []
         summary: list[str] = []
+        if stale:
+            summary.append("[WARNING] Market data is stale.")
+        summary.extend(
+            f"[WARNING] Market data: {warning}" for warning in data_warnings
+        )
         for skill_id in skill_ids:
-            skill = self.registry.get(skill_id)
+            try:
+                skill = self.registry.get(skill_id)
+            except KeyError as exc:
+                results.append(
+                    SkillResult(
+                        skill_id=skill_id,
+                        status=SkillStatus.FAILED,
+                        error_code="skill_not_registered",
+                        error_message=str(exc),
+                    )
+                )
+                summary.append(f"[WARNING] {skill_id} analysis unavailable.")
+                continue
             try:
                 result = skill.run(request, dataset)
             except Exception as exc:
@@ -57,6 +84,17 @@ class FinanceOrchestrator:
             as_of=request.as_of,
             dataset_id=dataset.dataset_id,
             provider=dataset.provider,
+            completed_through=(
+                completed_through
+                or (
+                    dataset.bars[-1].trading_date
+                    if dataset.bars
+                    else request.as_of
+                )
+            ),
+            stale=stale,
+            data_warnings=list(data_warnings),
+            provider_attempts=list(provider_attempts),
             skill_results=results,
             summary=summary,
         )

@@ -21,6 +21,7 @@ from pa_investing.market_data.history.models import (
     DailyBar,
     HistoricalDataset,
     HistoricalInstrumentRef,
+    ProviderAttempt,
 )
 
 
@@ -160,3 +161,52 @@ def test_explicit_skill_ids_override_bundle_and_summary_is_reproducible() -> Non
     assert first.status is AnalysisStatus.SUCCESS
     assert [item.skill_id for item in first.skill_results] == ["working.v1"]
     assert first.summary == second.summary
+
+
+def test_orchestrator_isolates_unknown_explicit_skill() -> None:
+    registry = SkillRegistry()
+    registry.register(WorkingSkill())
+
+    result = FinanceOrchestrator(registry).run(
+        _request(skill_ids=("missing.v1", "working.v1")),
+        _dataset(),
+    )
+
+    assert result.status is AnalysisStatus.PARTIAL
+    assert result.skill_results[0].skill_id == "missing.v1"
+    assert result.skill_results[0].status is SkillStatus.FAILED
+    assert result.skill_results[1].status is SkillStatus.SUCCESS
+
+
+def test_registry_rejects_bundle_with_unknown_skill() -> None:
+    registry = SkillRegistry()
+
+    with pytest.raises(ValueError, match="unknown finance skill"):
+        registry.register_bundle("broken.v1", ("missing.v1",))
+
+
+def test_orchestrator_propagates_market_data_provenance() -> None:
+    registry = SkillRegistry()
+    registry.register(WorkingSkill())
+    registry.register_bundle("test_bundle.v1", ("working.v1",))
+    attempt = ProviderAttempt(
+        provider="yahoo",
+        accepted=False,
+        started_at=datetime(2026, 7, 15, tzinfo=UTC),
+        finished_at=datetime(2026, 7, 15, tzinfo=UTC),
+        error_code="request_failed",
+        message="provider unavailable",
+    )
+
+    result = FinanceOrchestrator(registry).run(
+        _request(bundle="test_bundle.v1"),
+        _dataset(),
+        stale=True,
+        data_warnings=("missing expected session: 2026-07-14",),
+        provider_attempts=(attempt,),
+    )
+
+    assert result.stale is True
+    assert result.data_warnings == ["missing expected session: 2026-07-14"]
+    assert result.provider_attempts == [attempt]
+    assert result.summary[0] == "[WARNING] Market data is stale."

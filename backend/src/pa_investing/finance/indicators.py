@@ -1,5 +1,5 @@
 from decimal import Decimal
-from math import sqrt
+from math import isfinite, sqrt
 
 import pandas as pd
 
@@ -21,8 +21,11 @@ def bars_frame(bars: list[DailyBar]) -> pd.DataFrame:
     )
 
 
-def decimal_metric(value: float, digits: int = 8) -> Decimal:
-    return Decimal(str(round(float(value), digits)))
+def decimal_metric(value: float, digits: int = 8) -> Decimal | None:
+    numeric = float(value)
+    if not isfinite(numeric):
+        return None
+    return Decimal(str(round(numeric, digits)))
 
 
 def rsi(close: pd.Series, period: int = 14) -> pd.Series:

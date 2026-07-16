@@ -41,10 +41,15 @@ class InstrumentCandidate(BaseModel):
     provider_ids: dict[str, str] = Field(default_factory=dict)
     confidence: Decimal
 
+    def market_code(self) -> str | None:
+        return DEFAULT_MARKET_CODES.market_for_exchange(
+            self.exchange
+        ) or DEFAULT_MARKET_CODES.market_for_exchange(self.mic_code)
+
     @computed_field
     @property
     def canonical_reference(self) -> str:
-        market_code = DEFAULT_MARKET_CODES.market_for_exchange(self.exchange)
+        market_code = self.market_code()
         if market_code is None:
             return self.display_symbol
         return str(
@@ -149,15 +154,12 @@ class InstrumentResolutionService:
                 market_filter = DEFAULT_MARKET_CODES.normalize(exchange_filter)
         merged: dict[tuple[str, str, str, str], InstrumentCandidate] = {}
         for searcher in self.searchers:
-            for candidate in searcher.search(query):
+            for candidate in searcher.search(symbol_query or query):
                 if symbol_query and candidate.display_symbol != symbol_query:
                     continue
                 if exchange_filter:
                     if market_filter:
-                        if (
-                            DEFAULT_MARKET_CODES.market_for_exchange(candidate.exchange)
-                            != market_filter
-                        ):
+                        if candidate.market_code() != market_filter:
                             continue
                     elif candidate.exchange != exchange_filter:
                         continue

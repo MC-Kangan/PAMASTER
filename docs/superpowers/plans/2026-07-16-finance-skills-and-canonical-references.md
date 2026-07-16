@@ -99,4 +99,3 @@
 - [ ] Run the complete pytest suite.
 - [ ] Review the diff for accidental coupling to providers or PA signals.
 - [ ] Commit the verified feature.
-

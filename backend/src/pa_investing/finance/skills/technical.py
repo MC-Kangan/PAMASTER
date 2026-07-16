@@ -53,10 +53,20 @@ class TechnicalSnapshotSkill:
                 ],
             )
 
-        thresholds = {
-            **self.metadata.default_thresholds,
-            **request.threshold_overrides.get(self.metadata.skill_id, {}),
-        }
+        thresholds = self.metadata.resolve_thresholds(
+            request.threshold_overrides.get(self.metadata.skill_id, {})
+        )
+        if not (
+            Decimal("0")
+            <= thresholds["rsi_oversold"]
+            < thresholds["rsi_overbought"]
+            <= Decimal("100")
+        ):
+            raise ValueError(
+                "RSI thresholds must satisfy 0 <= oversold < overbought <= 100"
+            )
+        if thresholds["volume_ratio_watch"] <= 0:
+            raise ValueError("volume ratio threshold must be positive")
         frame = bars_frame(bars)
         close = frame["close"]
         ema_12 = close.ewm(span=12, adjust=False).mean()

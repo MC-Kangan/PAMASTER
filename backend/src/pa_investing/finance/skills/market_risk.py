@@ -47,10 +47,28 @@ class MarketRiskSnapshotSkill:
                 metrics={"bar_count": len(bars)},
                 warnings=["Market risk snapshot requires at least 21 completed daily bars."],
             )
-        thresholds = {
-            **self.metadata.default_thresholds,
-            **request.threshold_overrides.get(self.metadata.skill_id, {}),
-        }
+        thresholds = self.metadata.resolve_thresholds(
+            request.threshold_overrides.get(self.metadata.skill_id, {})
+        )
+        if not (
+            Decimal("-1")
+            <= thresholds["drawdown_attention"]
+            < thresholds["drawdown_watch"]
+            <= Decimal("0")
+        ):
+            raise ValueError(
+                "drawdown thresholds must satisfy -1 <= attention < watch <= 0"
+            )
+        if not (
+            Decimal("0")
+            <= thresholds["volatility_watch"]
+            < thresholds["volatility_attention"]
+        ):
+            raise ValueError(
+                "volatility thresholds must satisfy 0 <= watch < attention"
+            )
+        if thresholds["daily_move_watch"] <= 0:
+            raise ValueError("daily move threshold must be positive")
         close = bars_frame(bars)["close"]
         peak = float(close.max())
         latest = float(close.iloc[-1])

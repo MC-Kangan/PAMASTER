@@ -7,7 +7,6 @@ class MarketDefinition:
     code: str
     aliases: frozenset[str]
     exchanges: frozenset[str]
-    yahoo_suffixes: tuple[str, ...] = ()
 
 
 class MarketCodeRegistry:
@@ -41,15 +40,6 @@ class MarketCodeRegistry:
             self._normalize_token(normalized)
         )
 
-    def display_symbol(self, provider_symbol: str, market_code: str) -> str:
-        symbol = provider_symbol.strip().upper()
-        definition = self._definitions[self.normalize(market_code)]
-        for suffix in definition.yahoo_suffixes:
-            if symbol.endswith(suffix):
-                return symbol[: -len(suffix)]
-        return symbol
-
-
 DEFAULT_MARKET_CODES = MarketCodeRegistry(
     (
         MarketDefinition(
@@ -78,55 +68,46 @@ DEFAULT_MARKET_CODES = MarketCodeRegistry(
             code="LN",
             aliases=frozenset({"LONDON", "UK"}),
             exchanges=frozenset({"LN", "LSE", "XLON", "LONDON"}),
-            yahoo_suffixes=(".L",),
         ),
         MarketDefinition(
             code="HK",
             aliases=frozenset({"HONGKONG", "HKEX"}),
             exchanges=frozenset({"HK", "HKG", "HKEX", "XHKG"}),
-            yahoo_suffixes=(".HK",),
         ),
         MarketDefinition(
             code="JP",
             aliases=frozenset({"JAPAN", "TOKYO", "TSE"}),
             exchanges=frozenset({"JP", "TSE", "XTKS", "TOKYO"}),
-            yahoo_suffixes=(".T",),
         ),
         MarketDefinition(
             code="GY",
             aliases=frozenset({"GERMANY", "XETRA"}),
             exchanges=frozenset({"GY", "XETRA", "XETR", "FRANKFURT"}),
-            yahoo_suffixes=(".DE", ".F"),
         ),
         MarketDefinition(
             code="FP",
             aliases=frozenset({"FRANCE", "PARIS"}),
             exchanges=frozenset({"FP", "EURONEXT PARIS", "XPAR", "PARIS"}),
-            yahoo_suffixes=(".PA",),
         ),
         MarketDefinition(
             code="NA",
             aliases=frozenset({"NETHERLANDS", "AMSTERDAM"}),
             exchanges=frozenset({"NA", "EURONEXT AMSTERDAM", "XAMS", "AMSTERDAM"}),
-            yahoo_suffixes=(".AS",),
         ),
         MarketDefinition(
             code="SW",
             aliases=frozenset({"SWITZERLAND", "SIX"}),
             exchanges=frozenset({"SW", "SIX", "XSWX"}),
-            yahoo_suffixes=(".SW",),
         ),
         MarketDefinition(
             code="IM",
             aliases=frozenset({"ITALY", "MILAN"}),
             exchanges=frozenset({"IM", "MILAN", "XMIL"}),
-            yahoo_suffixes=(".MI",),
         ),
         MarketDefinition(
             code="SM",
             aliases=frozenset({"SPAIN", "MADRID"}),
             exchanges=frozenset({"SM", "MADRID", "XMAD"}),
-            yahoo_suffixes=(".MC",),
         ),
     )
 )

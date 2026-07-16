@@ -1,13 +1,20 @@
 from datetime import date
 from decimal import Decimal
 from enum import StrEnum
-from typing import Protocol
+from typing import Protocol, Self
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    field_validator,
+    model_validator,
+)
 
 from pa_investing.market_data.history.models import (
     HistoricalDataset,
     HistoricalInstrumentRef,
+    ProviderAttempt,
 )
 
 MetricValue = Decimal | int | float | str | bool | None
@@ -61,6 +68,18 @@ class SkillMetadata(BaseModel):
             raise ValueError("skill_id must include a version suffix")
         return normalized
 
+    def resolve_thresholds(
+        self,
+        overrides: dict[str, Decimal],
+    ) -> dict[str, Decimal]:
+        unknown = set(overrides) - set(self.default_thresholds)
+        if unknown:
+            names = ", ".join(sorted(unknown))
+            raise ValueError(f"unknown threshold for {self.skill_id}: {names}")
+        if any(not value.is_finite() for value in overrides.values()):
+            raise ValueError(f"thresholds for {self.skill_id} must be finite")
+        return {**self.default_thresholds, **overrides}
+
 
 class AnalysisRequest(BaseModel):
     instrument: HistoricalInstrumentRef
@@ -79,6 +98,12 @@ class AnalysisRequest(BaseModel):
     @classmethod
     def normalize_skill_ids(cls, value: tuple[str, ...]) -> tuple[str, ...]:
         return tuple(item.strip().lower() for item in value)
+
+    @model_validator(mode="after")
+    def require_supported_asset_class(self) -> Self:
+        if self.instrument.asset_class.lower() not in {"equity", "etf"}:
+            raise ValueError("finance analysis v1 supports equities and ETFs only")
+        return self
 
 
 class Finding(BaseModel):
@@ -106,6 +131,10 @@ class AnalysisResult(BaseModel):
     as_of: date
     dataset_id: str
     provider: str
+    completed_through: date
+    stale: bool = False
+    data_warnings: list[str] = Field(default_factory=list)
+    provider_attempts: list[ProviderAttempt] = Field(default_factory=list)
     skill_results: list[SkillResult]
     summary: list[str]
 

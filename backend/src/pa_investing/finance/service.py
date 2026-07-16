@@ -1,3 +1,4 @@
+from collections.abc import Callable
 from datetime import date, timedelta
 from decimal import Decimal
 from typing import Protocol
@@ -41,10 +42,12 @@ class FinanceAnalysisService:
         resolver: PortfolioInstrumentResolver,
         historical_data: HistoricalDataClient,
         orchestrator: FinanceOrchestrator,
+        today: Callable[[], date] = date.today,
     ) -> None:
         self.resolver = resolver
         self.historical_data = historical_data
         self.orchestrator = orchestrator
+        self.today = today
 
     def analyze_portfolio(
         self,
@@ -112,6 +115,20 @@ class FinanceAnalysisService:
         skill_ids: tuple[str, ...],
         threshold_overrides: dict[str, dict[str, Decimal]] | None,
     ) -> AnalysisResult:
+        completed_through = min(
+            as_of,
+            self.today() - timedelta(days=1),
+        )
+        start_date = as_of - timedelta(days=lookback_days)
+        bounded_dataset = market_data.dataset.model_copy(
+            update={
+                "bars": [
+                    bar
+                    for bar in market_data.dataset.bars
+                    if start_date <= bar.trading_date <= completed_through
+                ]
+            }
+        )
         request = AnalysisRequest(
             instrument=instrument,
             as_of=as_of,
@@ -120,4 +137,11 @@ class FinanceAnalysisService:
             skill_ids=skill_ids,
             threshold_overrides=threshold_overrides or {},
         )
-        return self.orchestrator.run(request, market_data.dataset)
+        return self.orchestrator.run(
+            request,
+            bounded_dataset,
+            completed_through=completed_through,
+            stale=market_data.stale,
+            data_warnings=tuple(market_data.dataset.warnings),
+            provider_attempts=tuple(market_data.attempts),
+        )

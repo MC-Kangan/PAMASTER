@@ -17,6 +17,26 @@ YAHOO_EXCHANGE_ALIASES = {
     "LSE": "LSE",
 }
 
+YAHOO_MARKET_SUFFIXES = {
+    "LN": (".L",),
+    "HK": (".HK",),
+    "JP": (".T",),
+    "GY": (".DE", ".F"),
+    "FP": (".PA",),
+    "NA": (".AS",),
+    "SW": (".SW",),
+    "IM": (".MI",),
+    "SM": (".MC",),
+}
+
+
+def _yahoo_display_symbol(symbol: str, market_code: str | None) -> str:
+    normalized = symbol.strip().upper()
+    for suffix in YAHOO_MARKET_SUFFIXES.get(market_code or "", ()):
+        if normalized.endswith(suffix):
+            return normalized[: -len(suffix)]
+    return normalized
+
 
 def _asset_class(value: object) -> str:
     normalized = str(value or "").strip().lower()
@@ -52,9 +72,7 @@ class YahooInstrumentSearcher:
                 provider_exchange or None,
             )
             market_code = DEFAULT_MARKET_CODES.market_for_exchange(exchange)
-            display_symbol = (
-                DEFAULT_MARKET_CODES.display_symbol(symbol, market_code) if market_code else symbol
-            )
+            display_symbol = _yahoo_display_symbol(symbol, market_code)
             candidates.append(
                 InstrumentCandidate(
                     display_symbol=display_symbol,

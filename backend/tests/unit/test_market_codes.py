@@ -23,8 +23,3 @@ def test_market_registry_maps_listing_exchange_to_display_market() -> None:
     assert DEFAULT_MARKET_CODES.market_for_exchange("NASDAQ") == "US"
     assert DEFAULT_MARKET_CODES.market_for_exchange("LSE") == "LN"
     assert DEFAULT_MARKET_CODES.market_for_exchange("XLON") == "LN"
-
-
-def test_market_registry_strips_known_yahoo_listing_suffix() -> None:
-    assert DEFAULT_MARKET_CODES.display_symbol("GLEN.L", "LN") == "GLEN"
-    assert DEFAULT_MARKET_CODES.display_symbol("ADBE", "US") == "ADBE"
