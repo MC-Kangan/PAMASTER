@@ -1,15 +1,23 @@
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from uuid import uuid4
 
 from pa_investing.brokers.interfaces import BrokerConnector
 from pa_investing.db.repositories import (
     AccountRepository,
+    BrokerReconciliationRepository,
     PositionRepository,
     PriceRepository,
+    ProviderRunRepository,
+    TransactionRepository,
 )
-from pa_investing.domain.enums import CostBasisStatus, QuoteQuality
-from pa_investing.domain.models import Account, PricePoint
+from pa_investing.domain.enums import (
+    CostBasisStatus,
+    ProviderRunStatus,
+    QuoteQuality,
+)
+from pa_investing.domain.models import Account, PricePoint, ProviderRun
 
 
 @dataclass(frozen=True)
@@ -21,6 +29,9 @@ class BrokerImportResult:
     cost_basis_available: int = 0
     cost_basis_missing: int = 0
     missing_cost_basis_positions: list[dict[str, str]] | None = None
+    transactions_imported: int = 0
+    reconciliations_imported: int = 0
+    reconciliation_warnings: int = 0
 
 
 class BrokerImportWorkflow:
@@ -31,6 +42,10 @@ class BrokerImportWorkflow:
         position_repository: PositionRepository,
         commit: Callable[[], None],
         price_repository: PriceRepository | None = None,
+        transaction_repository: TransactionRepository | None = None,
+        reconciliation_repository: BrokerReconciliationRepository | None = None,
+        provider_run_repository: ProviderRunRepository | None = None,
+        rollback: Callable[[], None] | None = None,
         clock: Callable[[], datetime] | None = None,
     ) -> None:
         self.connector = connector
@@ -38,11 +53,47 @@ class BrokerImportWorkflow:
         self.position_repository = position_repository
         self.commit = commit
         self.price_repository = price_repository
+        self.transaction_repository = transaction_repository
+        self.reconciliation_repository = reconciliation_repository
+        self.provider_run_repository = provider_run_repository
+        self.rollback = rollback
         self.clock = clock or (lambda: datetime.now(tz=UTC))
 
     def run(self) -> BrokerImportResult:
+        started_at = self.clock()
+        run = ProviderRun(
+            run_id=str(uuid4()),
+            provider=_connector_provider(self.connector),
+            operation="broker_import",
+            status=ProviderRunStatus.RUNNING,
+            started_at=started_at,
+        )
+        if self.provider_run_repository is not None:
+            self.provider_run_repository.upsert(run)
+            self.commit()
+        try:
+            return self._run_import(run)
+        except Exception as error:
+            if self.provider_run_repository is not None:
+                if self.rollback is not None:
+                    self.rollback()
+                self.provider_run_repository.upsert(
+                    run.model_copy(
+                        update={
+                            "status": ProviderRunStatus.FAILED,
+                            "finished_at": self.clock(),
+                            "error_message": str(error)[:2048],
+                        }
+                    )
+                )
+                self.commit()
+            raise
+
+    def _run_import(self, run: ProviderRun) -> BrokerImportResult:
         accounts = self.connector.list_accounts()
         positions = self.connector.fetch_positions()
+        transactions = self.connector.fetch_transactions()
+        reconciliations = self.connector.fetch_reconciliations()
         if not accounts and not positions:
             raise RuntimeError("IBKR import returned no supported accounts or positions")
 
@@ -54,6 +105,14 @@ class BrokerImportWorkflow:
                     name=position.account_id,
                     source="ibkr",
                     base_currency=position.instrument.currency,
+                )
+        for item in [*transactions, *reconciliations]:
+            if item.account_id not in accounts_by_id:
+                accounts_by_id[item.account_id] = Account(
+                    account_id=item.account_id,
+                    name=item.account_id,
+                    source=_connector_provider(self.connector),
+                    base_currency=getattr(item, "currency", "USD"),
                 )
 
         for account in accounts_by_id.values():
@@ -104,7 +163,12 @@ class BrokerImportWorkflow:
             set(accounts_by_id),
             imported_instrument_ids_by_account,
         )
-        self.commit()
+        if self.transaction_repository is not None:
+            for transaction in transactions:
+                self.transaction_repository.upsert(transaction)
+        if self.reconciliation_repository is not None:
+            for reconciliation in reconciliations:
+                self.reconciliation_repository.upsert(reconciliation)
 
         cost_basis_available = 0
         cost_basis_missing = 0
@@ -121,6 +185,37 @@ class BrokerImportWorkflow:
                 )
             else:
                 cost_basis_available += 1
+        reconciliation_warnings = sum(
+            reconciliation.status.value == "warning"
+            for reconciliation in reconciliations
+        )
+        if self.provider_run_repository is not None:
+            self.provider_run_repository.upsert(
+                run.model_copy(
+                    update={
+                        "status": ProviderRunStatus.SUCCESS,
+                        "finished_at": self.clock(),
+                        "records_read": (
+                            len(accounts)
+                            + len(positions)
+                            + len(transactions)
+                            + len(reconciliations)
+                        ),
+                        "records_written": (
+                            len(accounts_by_id)
+                            + len(positions)
+                            + len(transactions)
+                            + len(reconciliations)
+                        ),
+                        "warning_count": (
+                            len(getattr(self.connector, "last_skipped_positions", []))
+                            + cost_basis_missing
+                            + reconciliation_warnings
+                        ),
+                    }
+                )
+            )
+        self.commit()
 
         return BrokerImportResult(
             accounts_imported=len(accounts_by_id),
@@ -130,4 +225,16 @@ class BrokerImportWorkflow:
             cost_basis_available=cost_basis_available,
             cost_basis_missing=cost_basis_missing,
             missing_cost_basis_positions=missing_cost_basis_positions or None,
+            transactions_imported=len(transactions),
+            reconciliations_imported=len(reconciliations),
+            reconciliation_warnings=reconciliation_warnings,
         )
+
+
+def _connector_provider(connector: BrokerConnector) -> str:
+    name = connector.__class__.__name__.lower()
+    if "flex" in name:
+        return "ibkr-flex"
+    if "clientportal" in name or "client_portal" in name:
+        return "ibkr-client-portal"
+    return name

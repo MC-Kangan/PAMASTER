@@ -15,6 +15,7 @@ class DailyReviewResult(BaseModel):
     snapshot: PortfolioSnapshot
     positions: list[Position]
     signals: list[Signal]
+    previous_daily_snapshot: PortfolioSnapshot | None = None
 
 
 class AgentAPI:

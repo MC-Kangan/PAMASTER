@@ -89,6 +89,66 @@ def portfolio_page() -> str:
             display: grid;
             gap: 12px;
           }
+          .chart-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 12px;
+            margin-bottom: 12px;
+          }
+          .chart-stage {
+            min-height: 260px;
+            display: grid;
+            place-items: center;
+          }
+          .donut-layout {
+            width: 100%;
+            display: grid;
+            grid-template-columns: minmax(140px, 220px) minmax(0, 1fr);
+            align-items: center;
+            gap: 20px;
+          }
+          .donut {
+            width: 100%;
+            aspect-ratio: 1;
+            border-radius: 50%;
+            position: relative;
+            background: #e5e7eb;
+          }
+          .donut::after {
+            content: "";
+            position: absolute;
+            inset: 28%;
+            border-radius: 50%;
+            background: #ffffff;
+          }
+          .legend {
+            display: grid;
+            gap: 8px;
+          }
+          .legend-row {
+            display: grid;
+            grid-template-columns: 12px minmax(0, 1fr) auto;
+            gap: 8px;
+            align-items: center;
+            font-size: 13px;
+          }
+          .legend-swatch {
+            width: 12px;
+            height: 12px;
+            border-radius: 3px;
+          }
+          .legend-label {
+            overflow-wrap: anywhere;
+          }
+          .nav-svg {
+            width: 100%;
+            height: 260px;
+            overflow: visible;
+          }
+          .chart-note {
+            color: #64748b;
+            font-size: 13px;
+          }
           .table-shell {
             overflow-x: auto;
             border-radius: 6px;
@@ -117,6 +177,15 @@ def portfolio_page() -> str:
             padding: 16px;
             color: #4b5563;
           }
+          @media (max-width: 640px) {
+            .donut-layout {
+              grid-template-columns: 1fr;
+            }
+            .donut {
+              max-width: 190px;
+              justify-self: center;
+            }
+          }
         </style>
       </head>
       <body>
@@ -127,6 +196,25 @@ def portfolio_page() -> str:
               </section>
               <section class="summary-grid">
             __SUMMARY_CARDS__
+              </section>
+              <section class="chart-grid">
+                <article class="chart-panel">
+                  <h2>Position Allocation</h2>
+                  <div class="chart-stage">
+                    <div class="donut-layout">
+                      <div class="donut" id="allocation-donut"></div>
+                      <div class="legend" id="allocation-legend">
+                        <div class="chart-note">Loading current holdings...</div>
+                      </div>
+                    </div>
+                  </div>
+                </article>
+                <article class="chart-panel">
+                  <h2>NAV History</h2>
+                  <div class="chart-stage" id="nav-chart">
+                    <div class="chart-note">Loading performance history...</div>
+                  </div>
+                </article>
               </section>
               <section class="chart-panel" id="performance-history">
                 <h2>Performance History</h2>
@@ -148,6 +236,19 @@ def portfolio_page() -> str:
         </main>
         <script>
           const fieldConfig = __FIELD_CONFIG__;
+          const chartColors = [
+            '#2563eb', '#0f766e', '#ca8a04', '#dc2626', '#7c3aed',
+            '#0891b2', '#4d7c0f', '#c2410c', '#475569', '#be185d'
+          ];
+
+          function escapeHtml(value) {
+            return String(value)
+              .replaceAll('&', '&amp;')
+              .replaceAll('<', '&lt;')
+              .replaceAll('>', '&gt;')
+              .replaceAll('"', '&quot;')
+              .replaceAll("'", '&#039;');
+          }
 
           function formatValue(value, displayKind) {
             if (value === null || value === undefined) {
@@ -184,6 +285,8 @@ def portfolio_page() -> str:
               }
             }
 
+            renderNavChart(payload.points);
+
             const body = document.getElementById('performance-body');
             if (!payload.points.length) {
               body.innerHTML = `
@@ -203,6 +306,81 @@ def portfolio_page() -> str:
               return `<tr>${cells}</tr>`;
             }).join('');
           }
+
+          function renderNavChart(points) {
+            const chart = document.getElementById('nav-chart');
+            if (!points.length) {
+              chart.innerHTML = '<div class="chart-note">No NAV history available.</div>';
+              return;
+            }
+            const values = points.map((point) => Number(point.nav));
+            const min = Math.min(...values);
+            const max = Math.max(...values);
+            const spread = max - min || 1;
+            const width = 640;
+            const height = 240;
+            const padding = 24;
+            const coordinates = values.map((value, index) => {
+              const x = points.length === 1
+                ? width / 2
+                : padding + index * ((width - padding * 2) / (points.length - 1));
+              const y = height - padding - ((value - min) / spread) * (height - padding * 2);
+              return {x, y};
+            });
+            const polyline = coordinates.map((point) => `${point.x},${point.y}`).join(' ');
+            const circles = coordinates.map((point) => (
+              `<circle cx="${point.x}" cy="${point.y}" r="4" fill="#2563eb"></circle>`
+            )).join('');
+            chart.innerHTML = `
+              <svg class="nav-svg" viewBox="0 0 ${width} ${height}" role="img"
+                   aria-label="Portfolio NAV history">
+                <line x1="${padding}" y1="${height - padding}" x2="${width - padding}"
+                      y2="${height - padding}" stroke="#cbd5e1"></line>
+                <polyline fill="none" stroke="#2563eb" stroke-width="3"
+                          stroke-linecap="round" stroke-linejoin="round"
+                          points="${polyline}"></polyline>
+                ${circles}
+              </svg>
+              <div class="chart-note">
+                ${points.length} persisted snapshot${points.length === 1 ? '' : 's'}
+              </div>
+            `;
+          }
+
+          async function loadCurrentPortfolio() {
+            const response = await fetch('/analysis/current');
+            const payload = await response.json();
+            const holdings = payload.holdings.filter(
+              (holding) => holding.reporting_market_value !== null
+            );
+            const donut = document.getElementById('allocation-donut');
+            const legend = document.getElementById('allocation-legend');
+            if (!holdings.length) {
+              donut.style.background = '#e5e7eb';
+              legend.innerHTML = '<div class="chart-note">No allocation available.</div>';
+              return;
+            }
+            let cursor = 0;
+            const segments = [];
+            holdings.forEach((holding, index) => {
+              const weight = Number(holding.portfolio_weight || 0) * 100;
+              const start = cursor;
+              cursor += weight;
+              segments.push(`${chartColors[index % chartColors.length]} ${start}% ${cursor}%`);
+            });
+            donut.style.background = `conic-gradient(${segments.join(', ')})`;
+            legend.innerHTML = holdings.map((holding, index) => {
+              const weight = Number(holding.portfolio_weight || 0) * 100;
+              return `
+                <div class="legend-row">
+                  <span class="legend-swatch"
+                        style="background:${chartColors[index % chartColors.length]}"></span>
+                  <span class="legend-label">${escapeHtml(holding.symbol)}</span>
+                  <strong>${weight.toFixed(1)}%</strong>
+                </div>
+              `;
+            }).join('');
+          }
           loadPerformance().catch(() => {
             document.getElementById('performance-body').innerHTML = `
               <tr>
@@ -210,7 +388,11 @@ def portfolio_page() -> str:
                   Performance history unavailable.
                 </td>
               </tr>
-            `;
+              `;
+          });
+          loadCurrentPortfolio().catch(() => {
+            document.getElementById('allocation-legend').innerHTML =
+              '<div class="chart-note">Allocation unavailable.</div>';
           });
         </script>
       </body>

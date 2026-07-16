@@ -40,6 +40,62 @@ How it should influence this project:
 - the system should continue moving toward a proper authenticated web app with responsive design;
 - deeper analytics should live in the browser app, while Notion remains the quick summary surface.
 
+#### Follow-up Review: 2026-07-16
+
+Ghostfolio has continued to mature and now provides more concrete patterns worth considering. The
+current repository uses a PostgreSQL-backed activity ledger, separate account-balance history,
+asset profiles and overrides, multiple portfolio calculator strategies, modular static risk rules,
+provider health checks, rate limiting, JWT/API-key authentication, and optional OIDC. It remains a
+mobile-first PWA and supports stocks, ETFs, crypto, cash-like liquidity, liabilities, fees,
+interest, and dividends.
+
+Useful source references:
+
+- [Ghostfolio repository and self-hosting guide](https://github.com/ghostfolio/ghostfolio)
+- [Database schema](https://github.com/ghostfolio/ghostfolio/blob/main/prisma/schema.prisma)
+- [Portfolio calculators](https://github.com/ghostfolio/ghostfolio/tree/main/apps/api/src/app/portfolio/calculator)
+- [Static portfolio rules](https://github.com/ghostfolio/ghostfolio/tree/main/apps/api/src/models/rules)
+- [Data-provider interface](https://github.com/ghostfolio/ghostfolio/blob/main/apps/api/src/services/data-provider/interfaces/data-provider.interface.ts)
+- [Import workflow](https://github.com/ghostfolio/ghostfolio/blob/main/apps/api/src/app/import/import.service.ts)
+
+Patterns to adopt:
+
+| Pattern | PA Investing application |
+| --- | --- |
+| Transaction/activity ledger | Add normalized buys, sells, dividends, fees, interest, transfers, and cash adjustments. Use this as the durable accounting history while broker positions remain a reconciled current view. |
+| Separate account-balance history | Keep broker-reported account NAV/cash snapshots separate from calculated holdings so discrepancies can be measured rather than hidden. |
+| Multiple return calculators | Implement TWR and MWR as independent analytics strategies with fixture-heavy tests. Do not overload the current simple snapshot return. |
+| Asset profile plus user overrides | Extend instrument metadata with optional sectors, countries, ETF look-through holdings, themes, and user overrides without making equity-specific identifiers mandatory. |
+| Static modular risk rules | Keep each concentration, currency, account, drawdown, and stop/reference rule as a small deterministic module producing explainable signals. |
+| Dry-run import and duplicate detection | Validate broker/transaction imports before persistence, show warnings, and make repeated imports idempotent. |
+| Benchmark abstraction | Allow the user to choose portfolio benchmarks and compare returns over standard periods. |
+| Provider health and freshness | Record last success, latency, stale-data status, and failure details for IBKR, Coinbase, market-data, FX, Notion, and future LLM providers. |
+| Mobile-first PWA | When the custom frontend becomes the primary UI, make it installable and phone-first instead of creating separate desktop and mobile applications. |
+| Layered authentication | Keep Tailscale plus HTTPS for the private MVP, then support OIDC/MFA, rotatable API tokens, login throttling, and correct reverse-proxy configuration if access expands. |
+
+Patterns to defer:
+
+- Redis and background queues until provider traffic or job duration makes them necessary;
+- multi-user roles, portfolio sharing, subscriptions, and public portfolio links;
+- a large frontend monorepo while Notion remains the main operating surface;
+- broad asset discovery and watchlist functionality before the real-portfolio accounting loop is
+  reliable.
+
+Recommended order of adoption:
+
+1. Transaction and cash-flow ledger.
+2. Reconciliation between broker NAV, positions, cash, and calculated totals.
+3. TWR/MWR and previous-day P&L adjusted for external cash flows.
+4. Provider health/run-status dashboard.
+5. Benchmark comparison and modular concentration-risk rules.
+6. PWA frontend and OIDC only when the custom browser application becomes the primary interface.
+
+Licensing note:
+
+Ghostfolio is licensed under AGPLv3. Architecture and product ideas can inform this project, but
+source code should not be copied into the repository unless an explicit licensing decision is made.
+For now, reuse concepts and independently implement the small pieces that fit.
+
 ### 2. OpenBB
 
 Repo:

@@ -279,15 +279,57 @@ API key is configured.
 
 Deliverable: one scheduled command refreshes the real portfolio safely and observably.
 
+### Slice 6: Ghostfolio-Inspired Operational Foundation
+
+This slice adopts three concepts from the Ghostfolio review without importing its larger
+multi-user architecture.
+
+1. **Provider-neutral transaction ledger**
+   - Store immutable economic events separately from current positions.
+   - Use provider plus external transaction ID as the idempotent import identity.
+   - Preserve signed broker cash effects for proceeds, fees, taxes, and net cash.
+   - Allow an optional instrument reference so equities, ETFs, crypto, cash, and future providers
+     can share the same ledger.
+   - Import IBKR Flex `Trade` rows first. Add granular dividends, interest, deposits,
+     withdrawals, transfers, and fees when those Flex sections or Coinbase events are enabled.
+   - Do not manufacture individual transactions from cumulative YTD summary fields.
+
+2. **Broker reconciliation**
+   - Compare the broker's daily base-currency NAV and cash with values reconstructed from the same
+     Flex statement.
+   - Reconstruct securities value from open-position value multiplied by `fxRateToBase`.
+   - Reconstruct cash from the base-currency cash report.
+   - Persist the difference, tolerance result, source, account, currency, and observation date.
+   - Treat reconciliation warnings as visible data-quality warnings, not as trading signals.
+
+3. **Provider health**
+   - Persist each IBKR import, market-data refresh, and enabled Notion sync as a provider run.
+   - Store start/end timestamps, status, counts, warning count, and a bounded error message.
+   - Persist failed runs after rolling back incomplete database work.
+   - Expose provider and reconciliation status through the authenticated analysis API.
+   - Keep the public `/health` endpoint nonsensitive and limited to process availability.
+
+Implementation status (2026-07-16): complete for the MVP foundation. New database tables store
+transactions, broker reconciliations, and provider runs. Flex trades and same-report NAV/cash
+reconciliations are imported idempotently. Broker imports, Twelve Data refreshes, and enabled
+Notion syncs record operational status. Authenticated endpoints expose the ledger and latest
+operational state:
+
+- `GET /analysis/transactions`
+- `GET /analysis/operations`
+
+This foundation deliberately does not yet calculate transaction-aware TWR/MWR or provide a styled
+operations screen. Those features can consume the ledger and health endpoints later.
+
 ## Deferred Extensions
 
 - TWS/IB Gateway current-position overlay and reconciliation;
 - Coinbase view-only account adapter;
 - protected raw-payload retention;
-- cash balances and true NAV weights;
+- granular non-trade cash-flow import and classification;
 - transaction-aware time-weighted and money-weighted returns;
 - Sharpe ratio and attribution;
-- interactive browser charts;
+- richer interactive browser charts beyond the current allocation and NAV views;
 - LLM and specialist agents.
 
 ## Verification Gate

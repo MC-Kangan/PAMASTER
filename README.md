@@ -11,9 +11,9 @@ The working architecture today is:
 
 The system is intentionally analysis-only. It does not place trades or submit broker orders.
 
-The current mixed-currency workflow now supports explicit provider mappings and USD/GBP FX
-conversion. Cash balances, cash flows, and transaction-aware returns are still required before
-NAV, drawdown, and sizing outputs are treated as investment-grade analytics.
+The current mixed-currency workflow supports explicit provider mappings, USD/GBP FX conversion,
+and IBKR Flex cash balances. Cash-flow-aware returns and broker NAV reconciliation are still
+required before drawdown and return outputs are treated as investment-grade analytics.
 
 ## Current Status
 
@@ -42,9 +42,12 @@ In practical terms, the repo can now:
 - sync `Signals` and `Daily Review` to Notion
 - read portfolio base currency and manual cost overrides from Notion
 - sync compact `Settings`, `Accounts`, and `Positions` views without overwriting user fields
+- show all holdings, rounded review totals, portfolio weights, and prior-day NAV change in Notion
 - expose a manual refresh API
 - expose a performance-history API
+- expose responsive allocation and NAV-history charts for phone and desktop browsers
 - protect browser analytics routes with a simple auth gate
+- support a private NAS deployment model using Tailscale, HTTPS, and application authentication
 - provide a NAS-runnable command for the fixed snapshot cadence
 
 ## What Has Been Implemented
@@ -125,12 +128,14 @@ Implemented so far:
 - successful refresh transactions commit before any Notion write
 - bearer-token protection for the refresh workflow trigger
 - performance-history and scheduling runbook
+- responsive position-allocation donut chart
+- responsive historical NAV line chart
+- one-snapshot-per-day performance series for daily return calculations
 
 Still pending in this slice:
 
-- richer visual chart rendering
 - entering the four command triggers in the uGREEN NAS scheduler
-- visual verification of the richer dashboard on computer and smartphone browsers
+- production NAS authentication and visual verification on the deployed URL
 
 ### Phase 2: General Instrument Identity Slice
 
@@ -159,7 +164,8 @@ Implemented:
 - stale and missing FX status in schema-flexible Notion payloads
 - CSV mapping importer and instrument-ID output in the position inspection command
 
-Live validation against representative instruments remains pending the user's Twelve Data key.
+Live Twelve Data validation is complete for the currently mapped portfolio. Unsupported listings
+continue to use their timestamped IBKR Flex marks and are labelled as fallbacks.
 
 ## Code Structure
 
@@ -252,6 +258,9 @@ Implemented routes:
 - `GET /analysis/portfolio`
 - `GET /analysis/signal/{signal_id}`
 - `GET /analysis/performance`
+- `GET /analysis/current`
+- `GET /analysis/transactions`
+- `GET /analysis/operations`
 - `POST /workflows/refresh-and-sync`
 
 ## What Still Needs To Be Done For The First Real Notion MVP
@@ -280,6 +289,11 @@ Imported positions now retain broker cost provenance. A manual average-cost over
 an explicit zero for a genuinely free share, survives later broker imports. Positions without a
 reliable cost basis display `unavailable` and are excluded from reliable P&L. The user-facing
 Notion `Cost Override` field is part of the next implementation slice.
+
+IBKR Flex imports now also persist a provider-neutral trade ledger and a same-report NAV/cash
+reconciliation. Repeated imports update the same external trade IDs rather than duplicating them.
+Provider runs record IBKR import, market-data refresh, and enabled Notion sync status for the
+authenticated operations endpoint.
 
 ## What Still Needs To Be Done For The Next MVP Slice
 

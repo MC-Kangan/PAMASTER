@@ -32,3 +32,71 @@ class PerformanceHistoryResponse(BaseModel):
     simple_return: str | None
     max_drawdown: str | None
     points: list[PerformancePointResponse]
+
+
+class CurrentHoldingResponse(BaseModel):
+    symbol: str
+    asset_class: str
+    local_currency: str
+    reporting_market_value: str | None
+    portfolio_weight: str | None
+    reporting_unrealized_pnl: str | None
+    cost_status: str
+
+
+class CurrentPortfolioResponse(BaseModel):
+    reporting_currency: str
+    nav: str
+    reporting_coverage: str
+    holdings: list[CurrentHoldingResponse]
+
+
+class TransactionResponse(BaseModel):
+    transaction_id: str
+    account_id: str
+    provider: str
+    external_id: str
+    occurred_at: datetime
+    transaction_type: str
+    currency: str
+    symbol: str | None
+    quantity: str
+    unit_price: str | None
+    gross_amount: str
+    fees: str
+    taxes: str
+    net_cash: str
+    description: str | None
+
+
+class ReconciliationResponse(BaseModel):
+    reconciliation_id: str
+    account_id: str
+    provider: str
+    observed_at: datetime
+    currency: str
+    broker_nav: str
+    calculated_nav: str
+    nav_difference: str
+    broker_cash: str
+    calculated_cash: str
+    cash_difference: str
+    status: str
+
+
+class ProviderRunResponse(BaseModel):
+    run_id: str
+    provider: str
+    operation: str
+    status: str
+    started_at: datetime
+    finished_at: datetime | None
+    records_read: int
+    records_written: int
+    warning_count: int
+    error_message: str | None
+
+
+class OperationsResponse(BaseModel):
+    providers: list[ProviderRunResponse]
+    reconciliations: list[ReconciliationResponse]

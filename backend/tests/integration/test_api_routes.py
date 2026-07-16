@@ -5,9 +5,30 @@ import pytest
 from fastapi.testclient import TestClient
 
 from pa_investing.core.config import Settings
-from pa_investing.core.dependencies import get_refresh_and_sync_workflow, get_settings
-from pa_investing.domain.enums import AssetClass, SignalSeverity, SignalStatus, SignalType
-from pa_investing.domain.models import Instrument, PortfolioSnapshot, Position, Signal
+from pa_investing.core.dependencies import (
+    OperationsAnalysisContext,
+    get_operations_analysis_context,
+    get_refresh_and_sync_workflow,
+    get_settings,
+)
+from pa_investing.domain.enums import (
+    AssetClass,
+    ProviderRunStatus,
+    ReconciliationStatus,
+    SignalSeverity,
+    SignalStatus,
+    SignalType,
+    TransactionType,
+)
+from pa_investing.domain.models import (
+    BrokerReconciliation,
+    Instrument,
+    PortfolioSnapshot,
+    Position,
+    ProviderRun,
+    Signal,
+    Transaction,
+)
 from pa_investing.main import create_app
 from pa_investing.workflows.agent_api import DailyReviewResult
 
@@ -79,6 +100,8 @@ def test_portfolio_analysis_page() -> None:
 
     assert response.status_code == 200
     assert "Portfolio Analysis" in response.text
+    assert "allocation-donut" in response.text
+    assert "nav-chart" in response.text
 
 
 def test_analysis_signal_page_contains_signal_id() -> None:
@@ -356,3 +379,85 @@ def test_performance_analysis_page_renders() -> None:
     assert 'id="performance-history"' in response.text
     assert 'id="performance-body"' in response.text
     assert "overflow-wrap: anywhere;" in response.text
+
+
+def test_operations_and_transactions_routes_return_operational_data() -> None:
+    observed_at = datetime(2026, 7, 10, 12, tzinfo=UTC)
+
+    class FakeTransactionRepository:
+        def list_all(self) -> list[Transaction]:
+            return [
+                Transaction(
+                    transaction_id="ibkr-flex:U1:tx-1",
+                    account_id="U1",
+                    provider="ibkr-flex",
+                    external_id="tx-1",
+                    occurred_at=observed_at,
+                    transaction_type=TransactionType.BUY,
+                    currency="USD",
+                    symbol="SPGI",
+                    quantity=Decimal("2"),
+                    unit_price=Decimal("430"),
+                    gross_amount=Decimal("-860"),
+                    fees=Decimal("-1"),
+                    net_cash=Decimal("-861"),
+                )
+            ]
+
+    class FakeReconciliationRepository:
+        def latest_by_account(self) -> list[BrokerReconciliation]:
+            return [
+                BrokerReconciliation(
+                    reconciliation_id="ibkr-flex:U1:20260710",
+                    account_id="U1",
+                    provider="ibkr-flex",
+                    observed_at=observed_at,
+                    currency="GBP",
+                    broker_nav=Decimal("1000"),
+                    calculated_nav=Decimal("999.99"),
+                    nav_difference=Decimal("-0.01"),
+                    broker_cash=Decimal("100"),
+                    calculated_cash=Decimal("100"),
+                    cash_difference=Decimal("0"),
+                    status=ReconciliationStatus.MATCHED,
+                )
+            ]
+
+    class FakeProviderRunRepository:
+        def latest_by_provider(self) -> list[ProviderRun]:
+            return [
+                ProviderRun(
+                    run_id="run-1",
+                    provider="ibkr-flex",
+                    operation="broker_import",
+                    status=ProviderRunStatus.SUCCESS,
+                    started_at=observed_at,
+                    finished_at=observed_at,
+                    records_read=3,
+                    records_written=3,
+                )
+            ]
+
+    app = create_app()
+    app.dependency_overrides[get_settings] = lambda: Settings(
+        analytics_auth_enabled=False
+    )
+    app.dependency_overrides[get_operations_analysis_context] = lambda: (
+        OperationsAnalysisContext(
+            transaction_repository=FakeTransactionRepository(),  # type: ignore[arg-type]
+            reconciliation_repository=FakeReconciliationRepository(),  # type: ignore[arg-type]
+            provider_run_repository=FakeProviderRunRepository(),  # type: ignore[arg-type]
+        )
+    )
+    client = TestClient(app)
+
+    transactions = client.get("/analysis/transactions")
+    operations = client.get("/analysis/operations")
+
+    assert transactions.status_code == 200
+    assert transactions.json()[0]["transaction_type"] == "buy"
+    assert transactions.json()[0]["net_cash"] == "-861"
+    assert operations.status_code == 200
+    assert operations.json()["providers"][0]["status"] == "success"
+    assert operations.json()["reconciliations"][0]["status"] == "matched"
+    assert operations.json()["reconciliations"][0]["nav_difference"] == "-0.01"

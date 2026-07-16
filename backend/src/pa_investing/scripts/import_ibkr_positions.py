@@ -6,8 +6,11 @@ from pa_investing.brokers.ibkr_flex import IbkrFlexConnector
 from pa_investing.core.config import Settings
 from pa_investing.db.repositories import (
     AccountRepository,
+    BrokerReconciliationRepository,
     PositionRepository,
     PriceRepository,
+    ProviderRunRepository,
+    TransactionRepository,
 )
 from pa_investing.db.session import DatabaseSessionFactory
 from pa_investing.workflows.broker_import import BrokerImportResult, BrokerImportWorkflow
@@ -31,7 +34,11 @@ def run_ibkr_import(
                 account_repository=AccountRepository(session),
                 position_repository=PositionRepository(session),
                 price_repository=PriceRepository(session),
+                transaction_repository=TransactionRepository(session),
+                reconciliation_repository=BrokerReconciliationRepository(session),
+                provider_run_repository=ProviderRunRepository(session),
                 commit=session.commit,
+                rollback=getattr(session, "rollback", None),
             )
             result = workflow.run()
     else:
@@ -42,7 +49,10 @@ def run_ibkr_import(
         f"accounts={result.accounts_imported} "
         f"positions={result.positions_imported} "
         f"closed={result.positions_closed} "
-        f"skipped={len(result.skipped_positions)}"
+        f"skipped={len(result.skipped_positions)} "
+        f"transactions={result.transactions_imported} "
+        f"reconciliations={result.reconciliations_imported} "
+        f"reconciliation_warnings={result.reconciliation_warnings}"
     )
     for skipped in result.skipped_positions:
         print(

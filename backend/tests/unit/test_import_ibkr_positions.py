@@ -68,7 +68,11 @@ def test_run_ibkr_import_uses_flex_connector_when_flex_credentials_are_configure
             account_repository,
             position_repository,
             price_repository,
+            transaction_repository,
+            reconciliation_repository,
+            provider_run_repository,
             commit,
+            rollback,
         ):
             nonlocal captured_connector
             captured_connector = connector
@@ -99,6 +103,18 @@ def test_run_ibkr_import_uses_flex_connector_when_flex_credentials_are_configure
     )
     monkeypatch.setattr(
         "pa_investing.scripts.import_ibkr_positions.PositionRepository",
+        lambda session: object(),
+    )
+    monkeypatch.setattr(
+        "pa_investing.scripts.import_ibkr_positions.TransactionRepository",
+        lambda session: object(),
+    )
+    monkeypatch.setattr(
+        "pa_investing.scripts.import_ibkr_positions.BrokerReconciliationRepository",
+        lambda session: object(),
+    )
+    monkeypatch.setattr(
+        "pa_investing.scripts.import_ibkr_positions.ProviderRunRepository",
         lambda session: object(),
     )
 

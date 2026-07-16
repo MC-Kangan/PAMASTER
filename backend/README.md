@@ -252,8 +252,14 @@ more than 50% away from the current broker/persisted mark is also quarantined as
 jump instead of silently replacing the portfolio value.
 
 The reporting currency comes from the Notion `Portfolio` Settings row when available, otherwise
-`PA_DEFAULT_BASE_CURRENCY`. Missing FX leaves the position visible but excludes it from aggregate
-reporting totals. `Reporting Coverage` and `FX Status` make that incompleteness explicit.
+`PA_DEFAULT_BASE_CURRENCY`. Change the `Base Currency` select on that row to `USD` or `GBP`; the
+selection takes effect on the next refresh. Missing FX leaves the position visible but excludes it
+from aggregate reporting totals. `Reporting Coverage` and `FX Status` make that incompleteness
+explicit.
+
+IBKR Flex `CashReportCurrency` rows are imported as provider-neutral cash positions such as
+`CASH.GBP`. This keeps the domain model compatible with future brokers while allowing cash to be
+included in account totals, portfolio weights, and the allocation chart.
 
 ## Refresh-And-Sync Workflow Trigger
 
@@ -297,7 +303,10 @@ curl -X POST http://localhost:8000/workflows/refresh-and-sync \
   -d '{"stop_prices": {"SPGI": "470", "ASML": "900", "SAP": "240", "SGLN": "22", "SMH": "250"}}'
 ```
 
-After the workflow runs, inspect Notion `Signals` and `Daily Review`.
+After the workflow runs, inspect the top-level Notion `PA Investing` dashboard. It contains compact
+linked views for latest reviews, holdings, accounts, open signals, the review calendar, and the
+portfolio settings row. The source databases live under `PA Investing Data` to avoid duplicate
+tables on the operating page.
 
 Successful refresh requests commit the updated prices, positions, snapshot, signals, and
 audit records before any Notion write begins. Performance history therefore survives across
@@ -312,6 +321,24 @@ The chart-ready history endpoint is:
 GET /analysis/performance
 ```
 
+The current holdings and allocation endpoint is:
+
+```text
+GET /analysis/current
+```
+
+The provider-neutral transaction ledger and operational status endpoints are:
+
+```text
+GET /analysis/transactions
+GET /analysis/operations
+```
+
+Both are protected by the same analytics authentication as the browser application.
+`/analysis/transactions` currently contains idempotently imported IBKR Flex trade executions.
+`/analysis/operations` contains the latest run for each provider/operation and the latest broker
+NAV/cash reconciliation for each account.
+
 With analytics auth enabled, inspect it locally with:
 
 ```bash
@@ -324,8 +351,74 @@ Open the browser analytics page at:
 http://localhost:8000/analysis/portfolio
 ```
 
-The browser surface is intended for both computer and smartphone browsers. The current
-version is a responsive page shell; richer visual chart rendering is the next UI task.
+The browser surface is intended for both computer and smartphone browsers. It renders a current
+position-allocation donut, a historical NAV line chart, and the daily performance table. Headline
+returns use the latest snapshot from each calendar day so the four intraday scheduled snapshots do
+not create artificial daily-return observations.
+
+The Notion free plan permits only one native chart for the workspace and the available chart slot
+is already consumed. Notion remains the compact operating dashboard; richer and interactive charts
+belong on this browser surface and can be linked from Notion.
+
+## Secure Browser Deployment
+
+All `/analysis/*` routes use an application authentication dependency. With authentication enabled:
+
+- missing or incorrect credentials return `401`;
+- blank configured credentials return `503`, leaving the application closed;
+- credential comparison uses constant-time comparison;
+- the write-capable refresh endpoint remains separately protected by
+  `PA_WORKFLOW_API_TOKEN`.
+
+The current application login uses HTTP Basic authentication. Basic authentication is suitable for
+this single-user MVP only when it is transported over HTTPS and the application is not directly
+exposed to the public internet.
+
+The recommended NAS deployment is:
+
+1. Keep the Docker port bound to NAS loopback with `PA_BIND_ADDRESS=127.0.0.1`.
+2. Install Tailscale on the NAS, phone, and authorized computers.
+3. Publish the loopback service through Tailscale Serve or an HTTPS NAS reverse proxy.
+4. Restrict the service to the user's tailnet identity/devices with Tailscale grants or ACLs.
+5. Keep application authentication enabled as a second layer.
+6. Do not enable Tailscale Funnel or router port forwarding for this application.
+
+Configure separate, randomly generated browser and workflow credentials:
+
+```bash
+PA_ANALYTICS_AUTH_ENABLED=true
+PA_ANALYTICS_AUTH_USERNAME=your_private_username
+PA_ANALYTICS_AUTH_PASSWORD=generate_a_long_random_password
+PA_WORKFLOW_API_TOKEN=generate_a_different_long_random_token
+PA_BIND_ADDRESS=127.0.0.1
+```
+
+Do not reuse the Notion, IBKR, market-data, NAS administrator, or Tailscale credentials. Store the
+values only in the NAS secret/environment configuration and the local ignored `.env`, never in
+Notion or Git.
+
+The browser app should remain unavailable when Tailscale is disconnected. This provides:
+
+- device and identity authorization at the private-network layer;
+- encrypted transport through HTTPS;
+- an additional application credential;
+- no public listener for the application container.
+
+Before any future public-internet deployment, replace Basic authentication with an
+identity-aware proxy or OIDC provider supporting MFA and login throttling. Suitable self-hosted
+options include Authentik or Authelia; a managed alternative is Cloudflare Access. The application
+should consume trusted identity headers or OIDC claims from that layer instead of implementing a
+new password database.
+
+The local development command may explicitly set `PA_ANALYTICS_AUTH_ENABLED=false`, but that
+override must never be used in the NAS deployment.
+
+References:
+
+- [Tailscale access controls](https://tailscale.com/docs/features/access-control)
+- [Tailscale Serve](https://tailscale.com/kb/1242/tailscale-serve)
+- [MDN HTTP authentication](https://developer.mozilla.org/en-US/docs/Web/HTTP/Guides/Authentication)
+- [OWASP Authentication Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/Authentication_Cheat_Sheet.html)
 
 ## Scheduled Snapshots
 
@@ -367,6 +460,10 @@ Run the database migration once before starting the API container for a fresh Po
 ```bash
 docker compose run --rm backend-api alembic upgrade head
 ```
+
+Migration `0008_operational_foundation` adds the transaction ledger, broker reconciliation, and
+provider-run tables. Run the same `alembic upgrade head` command for an existing volume before the
+next broker import.
 
 Then start the stack:
 

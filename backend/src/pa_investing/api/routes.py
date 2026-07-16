@@ -1,25 +1,42 @@
+from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Annotated
 
 from fastapi import APIRouter, Depends
 from fastapi.responses import HTMLResponse
 
-from pa_investing.analytics.performance import build_performance_history
+from pa_investing.analytics.performance import (
+    build_performance_history,
+    latest_snapshot_per_day,
+)
+from pa_investing.analytics.snapshots import build_portfolio_snapshot
+from pa_investing.analytics.valuation import apply_reporting_currency
 from pa_investing.analytics_app.pages import portfolio_page, signal_page
 from pa_investing.api.auth import require_analytics_auth, require_workflow_auth
 from pa_investing.api.schemas import (
+    CurrentHoldingResponse,
+    CurrentPortfolioResponse,
+    OperationsResponse,
     PerformanceHistoryResponse,
     PerformancePointResponse,
+    ProviderRunResponse,
+    ReconciliationResponse,
     RefreshAndSyncRequest,
     RefreshAndSyncResponse,
+    TransactionResponse,
 )
 from pa_investing.core.config import Settings
 from pa_investing.core.dependencies import (
+    OperationsAnalysisContext,
+    PortfolioAnalysisContext,
+    get_operations_analysis_context,
+    get_portfolio_analysis_context,
     get_portfolio_snapshot_repository,
     get_refresh_and_sync_workflow,
     get_settings,
 )
 from pa_investing.db.repositories import PortfolioSnapshotRepository
+from pa_investing.notion.sync import PORTFOLIO_BASE_CURRENCY_KEY
 from pa_investing.presentation.fields import serialize_decimal
 from pa_investing.workflows.refresh_and_sync import RefreshAndSyncWorkflow
 
@@ -55,7 +72,9 @@ def performance_analysis(
     _: Annotated[None, Depends(require_analytics_auth)],
     days: int | None = None,
 ) -> PerformanceHistoryResponse:
-    history = build_performance_history(repository.list_history(days=days))
+    history = build_performance_history(
+        latest_snapshot_per_day(repository.list_history(days=days))
+    )
     return PerformanceHistoryResponse(
         start_observed_at=history.start_observed_at,
         end_observed_at=history.end_observed_at,
@@ -73,6 +92,140 @@ def performance_analysis(
                 simple_return=_format_decimal(point.simple_return),
             )
             for point in history.points
+        ],
+    )
+
+
+@router.get("/analysis/current", response_model=CurrentPortfolioResponse)
+def current_portfolio_analysis(
+    context: Annotated[
+        PortfolioAnalysisContext,
+        Depends(get_portfolio_analysis_context),
+    ],
+    settings: Annotated[Settings, Depends(get_settings)],
+    _: Annotated[None, Depends(require_analytics_auth)],
+) -> CurrentPortfolioResponse:
+    positions = context.position_repository.list_open_positions()
+    reporting_currency = (
+        context.app_setting_repository.get(
+            PORTFOLIO_BASE_CURRENCY_KEY,
+            settings.default_base_currency,
+        )
+        or settings.default_base_currency
+    ).upper()
+    fx_rates = {}
+    for local_currency in {position.instrument.currency for position in positions}:
+        if local_currency == reporting_currency:
+            continue
+        point = context.fx_rate_repository.latest(local_currency, reporting_currency)
+        if point is not None:
+            fx_rates[(local_currency, reporting_currency)] = point
+    coverage = apply_reporting_currency(positions, reporting_currency, fx_rates)
+    snapshot = build_portfolio_snapshot(
+        snapshot_id="current",
+        positions=positions,
+        observed_at=datetime.now(tz=UTC),
+        base_currency=reporting_currency,
+    )
+    holdings = []
+    for position in sorted(
+        positions,
+        key=lambda item: abs(item.reporting_market_value or Decimal("0")),
+        reverse=True,
+    ):
+        value = position.reporting_market_value
+        weight = None if value is None or snapshot.nav == 0 else abs(value) / snapshot.nav
+        holdings.append(
+            CurrentHoldingResponse(
+                symbol=position.instrument.symbol,
+                asset_class=position.instrument.asset_class.value,
+                local_currency=position.instrument.currency,
+                reporting_market_value=_format_decimal_or_none(value),
+                portfolio_weight=_format_decimal_or_none(weight),
+                reporting_unrealized_pnl=_format_decimal_or_none(
+                    position.reporting_unrealized_pnl
+                ),
+                cost_status=position.cost_basis_status.value,
+            )
+        )
+    return CurrentPortfolioResponse(
+        reporting_currency=reporting_currency,
+        nav=_format_decimal(snapshot.nav),
+        reporting_coverage=_format_decimal(coverage.ratio),
+        holdings=holdings,
+    )
+
+
+@router.get("/analysis/transactions", response_model=list[TransactionResponse])
+def transaction_analysis(
+    context: Annotated[
+        OperationsAnalysisContext,
+        Depends(get_operations_analysis_context),
+    ],
+    _: Annotated[None, Depends(require_analytics_auth)],
+) -> list[TransactionResponse]:
+    return [
+        TransactionResponse(
+            transaction_id=item.transaction_id,
+            account_id=item.account_id,
+            provider=item.provider,
+            external_id=item.external_id,
+            occurred_at=item.occurred_at,
+            transaction_type=item.transaction_type.value,
+            currency=item.currency,
+            symbol=item.symbol,
+            quantity=_format_decimal(item.quantity),
+            unit_price=_format_decimal_or_none(item.unit_price),
+            gross_amount=_format_decimal(item.gross_amount),
+            fees=_format_decimal(item.fees),
+            taxes=_format_decimal(item.taxes),
+            net_cash=_format_decimal(item.net_cash),
+            description=item.description,
+        )
+        for item in context.transaction_repository.list_all()
+    ]
+
+
+@router.get("/analysis/operations", response_model=OperationsResponse)
+def operations_analysis(
+    context: Annotated[
+        OperationsAnalysisContext,
+        Depends(get_operations_analysis_context),
+    ],
+    _: Annotated[None, Depends(require_analytics_auth)],
+) -> OperationsResponse:
+    return OperationsResponse(
+        providers=[
+            ProviderRunResponse(
+                run_id=run.run_id,
+                provider=run.provider,
+                operation=run.operation,
+                status=run.status.value,
+                started_at=run.started_at,
+                finished_at=run.finished_at,
+                records_read=run.records_read,
+                records_written=run.records_written,
+                warning_count=run.warning_count,
+                error_message=run.error_message,
+            )
+            for run in context.provider_run_repository.latest_by_provider()
+        ],
+        reconciliations=[
+            ReconciliationResponse(
+                reconciliation_id=item.reconciliation_id,
+                account_id=item.account_id,
+                provider=item.provider,
+                observed_at=item.observed_at,
+                currency=item.currency,
+                broker_nav=_format_decimal(item.broker_nav),
+                calculated_nav=_format_decimal(item.calculated_nav),
+                nav_difference=_format_decimal(item.nav_difference),
+                broker_cash=_format_decimal(item.broker_cash),
+                calculated_cash=_format_decimal(item.calculated_cash),
+                cash_difference=_format_decimal(item.cash_difference),
+                status=item.status.value,
+            )
+            for item in context.reconciliation_repository.latest_by_account()
         ],
     )
 

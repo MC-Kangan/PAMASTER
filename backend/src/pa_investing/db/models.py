@@ -271,3 +271,67 @@ class PortfolioSnapshotRecord(Base):
         nullable=False,
         default=1,
     )
+
+
+class TransactionRecord(Base):
+    __tablename__ = "transactions"
+
+    transaction_id: Mapped[str] = mapped_column(String(160), primary_key=True)
+    account_id: Mapped[str] = mapped_column(
+        ForeignKey("accounts.account_id"),
+        nullable=False,
+        index=True,
+    )
+    instrument_id: Mapped[str | None] = mapped_column(
+        ForeignKey("instruments.instrument_id"),
+        nullable=True,
+    )
+    provider: Mapped[str] = mapped_column(String(64), nullable=False)
+    external_id: Mapped[str] = mapped_column(String(160), nullable=False)
+    occurred_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)
+    transaction_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    currency: Mapped[str] = mapped_column(String(8), nullable=False)
+    symbol: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    quantity: Mapped[Decimal] = mapped_column(Numeric(24, 8), nullable=False)
+    unit_price: Mapped[Decimal | None] = mapped_column(Numeric(24, 8), nullable=True)
+    gross_amount: Mapped[Decimal] = mapped_column(Numeric(24, 8), nullable=False)
+    fees: Mapped[Decimal] = mapped_column(Numeric(24, 8), nullable=False)
+    taxes: Mapped[Decimal] = mapped_column(Numeric(24, 8), nullable=False)
+    net_cash: Mapped[Decimal] = mapped_column(Numeric(24, 8), nullable=False)
+    description: Mapped[str | None] = mapped_column(String(512), nullable=True)
+
+
+class BrokerReconciliationRecord(Base):
+    __tablename__ = "broker_reconciliations"
+
+    reconciliation_id: Mapped[str] = mapped_column(String(160), primary_key=True)
+    account_id: Mapped[str] = mapped_column(
+        ForeignKey("accounts.account_id"),
+        nullable=False,
+        index=True,
+    )
+    provider: Mapped[str] = mapped_column(String(64), nullable=False)
+    observed_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)
+    currency: Mapped[str] = mapped_column(String(8), nullable=False)
+    broker_nav: Mapped[Decimal] = mapped_column(Numeric(24, 8), nullable=False)
+    calculated_nav: Mapped[Decimal] = mapped_column(Numeric(24, 8), nullable=False)
+    nav_difference: Mapped[Decimal] = mapped_column(Numeric(24, 8), nullable=False)
+    broker_cash: Mapped[Decimal] = mapped_column(Numeric(24, 8), nullable=False)
+    calculated_cash: Mapped[Decimal] = mapped_column(Numeric(24, 8), nullable=False)
+    cash_difference: Mapped[Decimal] = mapped_column(Numeric(24, 8), nullable=False)
+    status: Mapped[str] = mapped_column(String(32), nullable=False)
+
+
+class ProviderRunRecord(Base):
+    __tablename__ = "provider_runs"
+
+    run_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    provider: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    operation: Mapped[str] = mapped_column(String(64), nullable=False)
+    status: Mapped[str] = mapped_column(String(32), nullable=False)
+    started_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)
+    finished_at: Mapped[datetime | None] = mapped_column(UTCDateTime(), nullable=True)
+    records_read: Mapped[int] = mapped_column(nullable=False, default=0)
+    records_written: Mapped[int] = mapped_column(nullable=False, default=0)
+    warning_count: Mapped[int] = mapped_column(nullable=False, default=0)
+    error_message: Mapped[str | None] = mapped_column(String(2048), nullable=True)

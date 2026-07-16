@@ -1,10 +1,16 @@
 from decimal import Decimal
+from xml.etree import ElementTree
 
 import httpx
 import pytest
 
 from pa_investing.brokers.ibkr_flex import IbkrFlexConnector
-from pa_investing.domain.enums import AssetClass, CostBasisStatus
+from pa_investing.domain.enums import (
+    AssetClass,
+    CostBasisStatus,
+    ReconciliationStatus,
+    TransactionType,
+)
 
 
 def test_ibkr_flex_connector_fetches_report_and_maps_accounts_and_positions() -> None:
@@ -78,6 +84,20 @@ def test_ibkr_flex_connector_fetches_report_and_maps_accounts_and_positions() ->
                           markPrice="15"
                         />
                       </OpenPositions>
+                      <CashReport>
+                        <CashReportCurrency
+                          accountId="U1234567"
+                          currency="BASE_SUMMARY"
+                          levelOfDetail="BaseCurrency"
+                          endingCash="725.50"
+                        />
+                        <CashReportCurrency
+                          accountId="U1234567"
+                          currency="USD"
+                          levelOfDetail="Currency"
+                          endingCash="725.50"
+                        />
+                      </CashReport>
                     </FlexStatement>
                   </FlexStatements>
                 </FlexQueryResponse>
@@ -97,7 +117,7 @@ def test_ibkr_flex_connector_fetches_report_and_maps_accounts_and_positions() ->
     assert [account.account_id for account in accounts] == ["U1234567"]
     assert accounts[0].name == "Primary IBKR"
     assert accounts[0].base_currency == "USD"
-    assert len(positions) == 2
+    assert len(positions) == 3
     assert positions[0].instrument.symbol == "SPGI"
     assert positions[0].instrument.asset_class == AssetClass.EQUITY
     assert positions[0].quantity == Decimal("10")
@@ -117,6 +137,11 @@ def test_ibkr_flex_connector_fetches_report_and_maps_accounts_and_positions() ->
     assert positions[1].instrument.asset_class == AssetClass.ETF
     assert positions[1].instrument.currency == "GBP"
     assert positions[1].cost_basis_status == CostBasisStatus.BROKER
+    assert positions[2].instrument.symbol == "CASH.USD"
+    assert positions[2].instrument.asset_class == AssetClass.CASH
+    assert positions[2].quantity == Decimal("725.50")
+    assert positions[2].latest_price == Decimal("1")
+    assert positions[2].cost_basis_status == CostBasisStatus.BROKER
     assert requests == [
         (
             "GET",
@@ -258,3 +283,80 @@ def test_ibkr_flex_connector_reconstructs_average_cost_from_matching_trades() ->
     }
     assert cost_basis_status_by_symbol["SPGI"] == CostBasisStatus.TRADE_RECONSTRUCTED
     assert cost_basis_status_by_symbol["MBGL"] == CostBasisStatus.UNAVAILABLE
+
+
+def test_ibkr_flex_connector_maps_trade_ledger_and_reconciles_daily_nav() -> None:
+    connector = IbkrFlexConnector(token="test-token", query_id="12345")
+    connector._statement_root = ElementTree.fromstring(
+        """
+        <FlexQueryResponse>
+          <FlexStatements>
+            <FlexStatement accountId="U1" accountName="IBKR" currency="GBP">
+              <Trades>
+                <Trade
+                  accountId="U1"
+                  transactionID="tx-1"
+                  dateTime="20260710;153000"
+                  assetCategory="STK"
+                  symbol="SPGI"
+                  description="S&amp;P Global"
+                  currency="USD"
+                  listingExchange="NYSE"
+                  conid="4819271"
+                  buySell="BUY"
+                  quantity="2"
+                  tradePrice="430.5"
+                  proceeds="-861"
+                  ibCommission="-1"
+                  taxes="0"
+                  netCash="-862"
+                />
+              </Trades>
+              <OpenPositions>
+                <OpenPosition
+                  accountId="U1"
+                  symbol="SPGI"
+                  assetCategory="STK"
+                  currency="USD"
+                  positionValue="900"
+                  fxRateToBase="1"
+                />
+              </OpenPositions>
+              <CashReport>
+                <CashReportCurrency
+                  accountId="U1"
+                  currency="BASE_SUMMARY"
+                  levelOfDetail="BaseCurrency"
+                  endingCash="100"
+                />
+              </CashReport>
+              <EquitySummaryByReportDateInBase
+                accountId="U1"
+                currency="GBP"
+                reportDate="20260710"
+                cash="100"
+                total="1000"
+              />
+            </FlexStatement>
+          </FlexStatements>
+        </FlexQueryResponse>
+        """
+    )
+
+    transactions = connector.fetch_transactions()
+    reconciliations = connector.fetch_reconciliations()
+
+    assert len(transactions) == 1
+    assert transactions[0].transaction_id == "ibkr-flex:U1:tx-1"
+    assert transactions[0].transaction_type == TransactionType.BUY
+    assert transactions[0].gross_amount == Decimal("-861")
+    assert transactions[0].fees == Decimal("-1")
+    assert transactions[0].net_cash == Decimal("-862")
+    assert transactions[0].instrument is not None
+    assert transactions[0].instrument.symbol == "SPGI"
+
+    assert len(reconciliations) == 1
+    assert reconciliations[0].broker_nav == Decimal("1000")
+    assert reconciliations[0].calculated_nav == Decimal("1000")
+    assert reconciliations[0].nav_difference == Decimal("0")
+    assert reconciliations[0].status == ReconciliationStatus.MATCHED

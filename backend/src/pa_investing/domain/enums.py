@@ -41,3 +41,29 @@ class QuoteQuality(StrEnum):
     EOD = "eod"
     EOD_FALLBACK = "eod_fallback"
     MANUAL = "manual"
+
+
+class TransactionType(StrEnum):
+    BUY = "buy"
+    SELL = "sell"
+    DIVIDEND = "dividend"
+    INTEREST = "interest"
+    FEE = "fee"
+    TAX = "tax"
+    DEPOSIT = "deposit"
+    WITHDRAWAL = "withdrawal"
+    TRANSFER_IN = "transfer_in"
+    TRANSFER_OUT = "transfer_out"
+    FX = "fx"
+    OTHER = "other"
+
+
+class ReconciliationStatus(StrEnum):
+    MATCHED = "matched"
+    WARNING = "warning"
+
+
+class ProviderRunStatus(StrEnum):
+    RUNNING = "running"
+    SUCCESS = "success"
+    FAILED = "failed"

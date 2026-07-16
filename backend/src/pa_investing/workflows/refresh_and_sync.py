@@ -1,6 +1,8 @@
 import logging
 from collections.abc import Callable
+from datetime import UTC, datetime
 from decimal import Decimal
+from uuid import uuid4
 
 from pa_investing.analytics.valuation import apply_reporting_currency
 from pa_investing.db.repositories import (
@@ -8,10 +10,13 @@ from pa_investing.db.repositories import (
     AppSettingRepository,
     FxRateRepository,
     MarketDataMappingRepository,
+    PortfolioSnapshotRepository,
     PositionRepository,
     PriceRepository,
+    ProviderRunRepository,
 )
-from pa_investing.domain.models import Position
+from pa_investing.domain.enums import ProviderRunStatus
+from pa_investing.domain.models import PortfolioSnapshot, Position, ProviderRun
 from pa_investing.market_data.interfaces import (
     FxRateRequest,
     MarketDataProvider,
@@ -42,6 +47,11 @@ class RefreshAndSyncWorkflow:
         app_setting_repository: AppSettingRepository | None = None,
         market_data_mapping_repository: MarketDataMappingRepository | None = None,
         fx_rate_repository: FxRateRepository | None = None,
+        snapshot_repository: PortfolioSnapshotRepository | None = None,
+        provider_run_repository: ProviderRunRepository | None = None,
+        rollback: Callable[[], None] | None = None,
+        notion_provider_name: str | None = None,
+        clock: Callable[[], datetime] | None = None,
         default_base_currency: str = "USD",
     ) -> None:
         self.position_repository = position_repository
@@ -54,6 +64,11 @@ class RefreshAndSyncWorkflow:
         self.app_setting_repository = app_setting_repository
         self.market_data_mapping_repository = market_data_mapping_repository
         self.fx_rate_repository = fx_rate_repository
+        self.snapshot_repository = snapshot_repository
+        self.provider_run_repository = provider_run_repository
+        self.rollback = rollback
+        self.notion_provider_name = notion_provider_name
+        self.clock = clock or (lambda: datetime.now(tz=UTC))
         self.default_base_currency = default_base_currency.upper()
 
     def run(self, stop_prices: dict[str, Decimal]) -> DailyReviewResult:
@@ -61,32 +76,139 @@ class RefreshAndSyncWorkflow:
         self._apply_notion_inputs(positions)
         positions = self.position_repository.list_open_positions()
         base_currency = self._base_currency()
-        if (
-            self.market_data_mapping_repository is not None
-            and self.fx_rate_repository is not None
-        ):
-            self._refresh_mapped_quotes(positions, base_currency)
-        else:
-            self._refresh_legacy_quotes(positions)
+        market_run = self._start_provider_run(
+            self.market_data_provider.provider_name,
+            "market_data_refresh",
+        )
+        try:
+            if (
+                self.market_data_mapping_repository is not None
+                and self.fx_rate_repository is not None
+            ):
+                self._refresh_mapped_quotes(positions, base_currency)
+            else:
+                self._refresh_legacy_quotes(positions)
 
-        result = self.daily_review_workflow.run(
-            positions=positions,
-            stop_prices=stop_prices,
-            sync_signals=False,
-            base_currency=base_currency,
-        )
-        self.commit()
-        if self.account_repository is not None:
-            self.notion_sync.sync_portfolio(
-                accounts=self.account_repository.list_all(),
+            result = self.daily_review_workflow.run(
                 positions=positions,
+                stop_prices=stop_prices,
+                sync_signals=False,
+                base_currency=base_currency,
             )
-        self.daily_review_workflow.sync_signals(result)
-        self.notion_sync.sync_daily_review(
-            result,
-            external_id=self._daily_review_external_id(result),
-        )
+            result.previous_daily_snapshot = self._previous_daily_snapshot(result)
+            self._finish_provider_run(
+                market_run,
+                ProviderRunStatus.SUCCESS,
+                records_read=len(positions),
+                records_written=len(positions),
+            )
+            self.commit()
+        except Exception as error:
+            if self.rollback is not None:
+                self.rollback()
+            self._finish_provider_run(
+                market_run,
+                ProviderRunStatus.FAILED,
+                error_message=str(error),
+            )
+            self.commit()
+            raise
+
+        notion_run = None
+        if self.notion_provider_name is not None:
+            notion_run = self._start_provider_run(
+                self.notion_provider_name,
+                "notion_sync",
+            )
+        try:
+            if self.account_repository is not None:
+                self.notion_sync.sync_portfolio(
+                    accounts=self.account_repository.list_all(),
+                    positions=positions,
+                )
+            self.daily_review_workflow.sync_signals(result)
+            self.notion_sync.sync_daily_review(
+                result,
+                external_id=self._daily_review_external_id(result),
+            )
+            if notion_run is not None:
+                self._finish_provider_run(
+                    notion_run,
+                    ProviderRunStatus.SUCCESS,
+                    records_read=len(positions) + len(result.signals) + 1,
+                    records_written=len(positions) + len(result.signals) + 1,
+                )
+                self.commit()
+        except Exception as error:
+            if notion_run is not None:
+                self._finish_provider_run(
+                    notion_run,
+                    ProviderRunStatus.FAILED,
+                    error_message=str(error),
+                )
+                self.commit()
+            raise
         return result
+
+    def _start_provider_run(
+        self,
+        provider: str,
+        operation: str,
+    ) -> ProviderRun | None:
+        if self.provider_run_repository is None:
+            return None
+        run = ProviderRun(
+            run_id=str(uuid4()),
+            provider=provider,
+            operation=operation,
+            status=ProviderRunStatus.RUNNING,
+            started_at=self.clock(),
+        )
+        self.provider_run_repository.upsert(run)
+        self.commit()
+        return run
+
+    def _finish_provider_run(
+        self,
+        run: ProviderRun | None,
+        status: ProviderRunStatus,
+        *,
+        records_read: int = 0,
+        records_written: int = 0,
+        error_message: str | None = None,
+    ) -> None:
+        if run is None or self.provider_run_repository is None:
+            return
+        self.provider_run_repository.upsert(
+            run.model_copy(
+                update={
+                    "status": status,
+                    "finished_at": self.clock(),
+                    "records_read": records_read,
+                    "records_written": records_written,
+                    "error_message": (
+                        error_message[:2048]
+                        if error_message is not None
+                        else None
+                    ),
+                }
+            )
+        )
+
+    def _previous_daily_snapshot(
+        self,
+        result: DailyReviewResult,
+    ) -> PortfolioSnapshot | None:
+        if self.snapshot_repository is None:
+            return None
+        current = result.snapshot
+        prior = [
+            snapshot
+            for snapshot in self.snapshot_repository.list_history()
+            if snapshot.base_currency == current.base_currency
+            and snapshot.observed_at.date() < current.observed_at.date()
+        ]
+        return prior[-1] if prior else None
 
     def _refresh_legacy_quotes(self, positions: list[Position]) -> None:
         positions_by_symbol: dict[str, list[Position]] = {}

@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from decimal import Decimal
 from time import sleep
 from xml.etree import ElementTree
@@ -6,12 +7,19 @@ from xml.etree import ElementTree
 import httpx
 
 from pa_investing.brokers.interfaces import BrokerConnector
-from pa_investing.domain.enums import AssetClass, CostBasisStatus
+from pa_investing.domain.enums import (
+    AssetClass,
+    CostBasisStatus,
+    ReconciliationStatus,
+    TransactionType,
+)
 from pa_investing.domain.models import (
     Account,
+    BrokerReconciliation,
     Instrument,
     InstrumentIdentifier,
     Position,
+    Transaction,
 )
 
 DEFAULT_IBKR_FLEX_BASE_URL = (
@@ -109,6 +117,7 @@ class IbkrFlexConnector(BrokerConnector):
         self.last_skipped_positions = []
         positions: list[Position] = []
         trade_cost_basis = _trade_cost_basis_by_position(root)
+        base_currency_by_account = _base_currency_by_account(root)
 
         for node in root.findall(".//OpenPosition"):
             account_id = _first_attr(node, "accountId", "fromAccountId")
@@ -166,10 +175,167 @@ class IbkrFlexConnector(BrokerConnector):
                     average_cost=average_cost,
                     latest_price=latest_price,
                     cost_basis_status=cost_basis_status,
+                    reporting_currency=base_currency_by_account.get(account_id),
+                    fx_rate=_optional_decimal(
+                        _first_attr(node, "fxRateToBase", default="")
+                    ),
                 )
             )
 
+        positions.extend(_cash_positions(root))
+
         return positions
+
+    def fetch_transactions(self) -> list[Transaction]:
+        root = self._load_statement()
+        transactions: list[Transaction] = []
+        for node in root.findall(".//Trade"):
+            account_id = _first_attr(node, "accountId", "fromAccountId")
+            external_id = _first_attr(
+                node,
+                "transactionID",
+                "tradeID",
+                "ibExecID",
+            )
+            if not account_id or not external_id:
+                continue
+            symbol = _first_attr(node, "symbol", "underlyingSymbol") or None
+            instrument = None
+            try:
+                asset_class = _map_asset_class(node)
+            except ValueError:
+                asset_class = None
+            if asset_class is not None and symbol is not None:
+                instrument = Instrument(
+                    symbol=symbol,
+                    name=_first_attr(node, "description", default=symbol),
+                    asset_class=asset_class,
+                    currency=_first_attr(node, "currency", default="USD"),
+                    venue=_first_attr(
+                        node,
+                        "listingExchange",
+                        "exchange",
+                        default="",
+                    )
+                    or None,
+                    identifiers=_instrument_identifiers(node),
+                )
+            buy_sell = _first_attr(node, "buySell").upper()
+            if asset_class == AssetClass.CASH:
+                transaction_type = TransactionType.FX
+            elif buy_sell == "BUY":
+                transaction_type = TransactionType.BUY
+            elif buy_sell == "SELL":
+                transaction_type = TransactionType.SELL
+            else:
+                transaction_type = TransactionType.OTHER
+            transactions.append(
+                Transaction(
+                    transaction_id=f"ibkr-flex:{account_id}:{external_id}",
+                    account_id=account_id,
+                    provider="ibkr-flex",
+                    external_id=external_id,
+                    occurred_at=_parse_flex_datetime(node),
+                    transaction_type=transaction_type,
+                    currency=_first_attr(node, "currency", default="USD"),
+                    symbol=symbol,
+                    instrument=instrument,
+                    quantity=_to_decimal(
+                        _first_attr(node, "quantity", default="0")
+                    ),
+                    unit_price=_optional_decimal(
+                        _first_attr(node, "tradePrice", default="")
+                    ),
+                    gross_amount=_to_decimal(
+                        _first_attr(node, "proceeds", default="0")
+                    ),
+                    fees=_to_decimal(
+                        _first_attr(node, "ibCommission", default="0")
+                    ),
+                    taxes=_to_decimal(_first_attr(node, "taxes", default="0")),
+                    net_cash=_to_decimal(
+                        _first_attr(node, "netCash", default="0")
+                    ),
+                    description=_first_attr(node, "description") or None,
+                )
+            )
+        return transactions
+
+    def fetch_reconciliations(self) -> list[BrokerReconciliation]:
+        root = self._load_statement()
+        latest_equity: dict[str, ElementTree.Element] = {}
+        for node in root.findall(".//EquitySummaryByReportDateInBase"):
+            account_id = _first_attr(node, "accountId", "fromAccountId")
+            report_date = _first_attr(node, "reportDate")
+            current = latest_equity.get(account_id)
+            if not account_id or not report_date:
+                continue
+            if current is None or report_date > _first_attr(current, "reportDate"):
+                latest_equity[account_id] = node
+
+        base_cash: dict[str, Decimal] = {}
+        for node in root.findall(".//CashReportCurrency"):
+            if _first_attr(node, "levelOfDetail").lower() != "basecurrency":
+                continue
+            account_id = _first_attr(node, "accountId", "fromAccountId")
+            if account_id:
+                base_cash[account_id] = _to_decimal(
+                    _first_attr(node, "endingCash", default="0")
+                )
+
+        securities_value: dict[str, Decimal] = {}
+        for node in root.findall(".//OpenPosition"):
+            account_id = _first_attr(node, "accountId", "fromAccountId")
+            if not account_id:
+                continue
+            local_value = _to_decimal(
+                _first_attr(node, "positionValue", default="0")
+            )
+            fx_rate = _to_decimal(
+                _first_attr(node, "fxRateToBase", default="1")
+            )
+            securities_value[account_id] = (
+                securities_value.get(account_id, Decimal("0"))
+                + local_value * fx_rate
+            )
+
+        reconciliations: list[BrokerReconciliation] = []
+        tolerance = Decimal("0.02")
+        for account_id, node in latest_equity.items():
+            broker_nav = _to_decimal(_first_attr(node, "total", default="0"))
+            broker_cash = _to_decimal(_first_attr(node, "cash", default="0"))
+            calculated_cash = base_cash.get(account_id, Decimal("0"))
+            calculated_nav = (
+                securities_value.get(account_id, Decimal("0")) + calculated_cash
+            )
+            nav_difference = calculated_nav - broker_nav
+            cash_difference = calculated_cash - broker_cash
+            status = (
+                ReconciliationStatus.MATCHED
+                if abs(nav_difference) <= tolerance
+                and abs(cash_difference) <= tolerance
+                else ReconciliationStatus.WARNING
+            )
+            report_date = _first_attr(node, "reportDate")
+            reconciliations.append(
+                BrokerReconciliation(
+                    reconciliation_id=(
+                        f"ibkr-flex:{account_id}:{report_date}"
+                    ),
+                    account_id=account_id,
+                    provider="ibkr-flex",
+                    observed_at=_parse_flex_date(report_date),
+                    currency=_first_attr(node, "currency", default="USD"),
+                    broker_nav=broker_nav,
+                    calculated_nav=calculated_nav,
+                    nav_difference=nav_difference,
+                    broker_cash=broker_cash,
+                    calculated_cash=calculated_cash,
+                    cash_difference=cash_difference,
+                    status=status,
+                )
+            )
+        return reconciliations
 
     def _load_statement(self) -> ElementTree.Element:
         if self._statement_root is not None:
@@ -268,6 +434,79 @@ def _optional_decimal(value: str) -> Decimal | None:
     if not value:
         return None
     return _to_decimal(value)
+
+
+def _parse_flex_date(value: str) -> datetime:
+    return datetime.strptime(value, "%Y%m%d").replace(tzinfo=UTC)
+
+
+def _parse_flex_datetime(node: ElementTree.Element) -> datetime:
+    value = _first_attr(node, "dateTime", "tradeDate", "reportDate")
+    for pattern in ("%Y%m%d;%H%M%S", "%Y%m%d"):
+        try:
+            return datetime.strptime(value, pattern).replace(tzinfo=UTC)
+        except ValueError:
+            continue
+    raise ValueError(f"unsupported IBKR Flex date/time: {value}")
+
+
+def _base_currency_by_account(
+    root: ElementTree.Element,
+) -> dict[str, str]:
+    currencies: dict[str, str] = {}
+    for statement in root.findall(".//FlexStatement"):
+        account_id = _first_attr(statement, "accountId", "fromAccountId")
+        if account_id:
+            currencies[account_id] = _first_attr(
+                statement,
+                "currency",
+                default="USD",
+            ).upper()
+    for info in root.findall(".//AccountInformation"):
+        account_id = _first_attr(info, "accountId", "fromAccountId")
+        if account_id:
+            currencies[account_id] = _first_attr(
+                info,
+                "currency",
+                "baseCurrency",
+                default=currencies.get(account_id, "USD"),
+            ).upper()
+    return currencies
+
+
+def _cash_positions(root: ElementTree.Element) -> list[Position]:
+    positions: list[Position] = []
+    for node in root.findall(".//CashReportCurrency"):
+        if _first_attr(node, "levelOfDetail").lower() != "currency":
+            continue
+        account_id = _first_attr(node, "accountId", "fromAccountId")
+        currency = _first_attr(node, "currency").upper()
+        ending_cash = _optional_decimal(_first_attr(node, "endingCash"))
+        if not account_id or not currency or not ending_cash:
+            continue
+        positions.append(
+            Position(
+                account_id=account_id,
+                instrument=Instrument(
+                    symbol=f"CASH.{currency}",
+                    name=f"{currency} Cash",
+                    asset_class=AssetClass.CASH,
+                    currency=currency,
+                    identifiers=(
+                        InstrumentIdentifier(
+                            provider="ibkr",
+                            identifier_type="cash_currency",
+                            value=f"{account_id}:{currency}",
+                        ),
+                    ),
+                ),
+                quantity=ending_cash,
+                average_cost=Decimal("1"),
+                latest_price=Decimal("1"),
+                cost_basis_status=CostBasisStatus.BROKER,
+            )
+        )
+    return positions
 
 
 def _instrument_identifiers(

@@ -4,7 +4,10 @@ from decimal import Decimal
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from pa_investing.analytics.performance import build_performance_history
+from pa_investing.analytics.performance import (
+    build_performance_history,
+    latest_snapshot_per_day,
+)
 from pa_investing.db.base import Base
 from pa_investing.db.repositories import PortfolioSnapshotRepository
 from pa_investing.domain.models import PortfolioSnapshot
@@ -54,6 +57,18 @@ def test_build_performance_history_handles_single_snapshot() -> None:
     assert len(history.points) == 1
     assert history.points[0].drawdown == Decimal("0")
     assert history.points[0].simple_return == Decimal("0")
+
+
+def test_latest_snapshot_per_day_keeps_last_refresh_for_each_day() -> None:
+    snapshots = [
+        _snapshot("morning", "2026-07-10T06:00:00+00:00", nav="900", pnl="0"),
+        _snapshot("evening", "2026-07-10T18:00:00+00:00", nav="1000", pnl="10"),
+        _snapshot("next-day", "2026-07-11T06:00:00+00:00", nav="1010", pnl="20"),
+    ]
+
+    result = latest_snapshot_per_day(snapshots)
+
+    assert [snapshot.snapshot_id for snapshot in result] == ["evening", "next-day"]
 
 
 def test_build_performance_history_handles_empty_history() -> None:

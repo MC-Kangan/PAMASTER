@@ -11,6 +11,7 @@ from pa_investing.db.models import (
     AccountRecord,
     AppSettingRecord,
     AuditEventRecord,
+    BrokerReconciliationRecord,
     FxRateRecord,
     InstrumentIdentifierRecord,
     InstrumentRecord,
@@ -18,18 +19,24 @@ from pa_investing.db.models import (
     PortfolioSnapshotRecord,
     PositionRecord,
     PriceRecord,
+    ProviderRunRecord,
     SignalRecord,
+    TransactionRecord,
 )
 from pa_investing.domain.enums import (
     AssetClass,
     CostBasisStatus,
+    ProviderRunStatus,
     QuoteQuality,
+    ReconciliationStatus,
     SignalSeverity,
     SignalStatus,
     SignalType,
+    TransactionType,
 )
 from pa_investing.domain.models import (
     Account,
+    BrokerReconciliation,
     FxRatePoint,
     Instrument,
     InstrumentIdentifier,
@@ -37,7 +44,9 @@ from pa_investing.domain.models import (
     PortfolioSnapshot,
     Position,
     PricePoint,
+    ProviderRun,
     Signal,
+    Transaction,
 )
 
 
@@ -716,4 +725,177 @@ class SignalRepository:
                 analytics_path=row.analytics_path,
             )
             for row in rows
+        ]
+
+
+class TransactionRepository:
+    def __init__(self, session: Session) -> None:
+        self.session = session
+
+    def upsert(self, transaction: Transaction) -> None:
+        instrument_id = None
+        if transaction.instrument is not None:
+            instrument_id = _resolve_instrument_record(
+                self.session,
+                transaction.instrument,
+            ).instrument_id
+        record = self.session.get(TransactionRecord, transaction.transaction_id)
+        if record is None:
+            record = TransactionRecord(transaction_id=transaction.transaction_id)
+            self.session.add(record)
+        record.account_id = transaction.account_id
+        record.instrument_id = instrument_id
+        record.provider = transaction.provider
+        record.external_id = transaction.external_id
+        record.occurred_at = _normalize_utc_timestamp(transaction.occurred_at)
+        record.transaction_type = transaction.transaction_type.value
+        record.currency = transaction.currency
+        record.symbol = transaction.symbol
+        record.quantity = transaction.quantity
+        record.unit_price = transaction.unit_price
+        record.gross_amount = transaction.gross_amount
+        record.fees = transaction.fees
+        record.taxes = transaction.taxes
+        record.net_cash = transaction.net_cash
+        record.description = transaction.description
+
+    def list_all(self) -> list[Transaction]:
+        rows = self.session.scalars(
+            select(TransactionRecord).order_by(TransactionRecord.occurred_at.asc())
+        ).all()
+        transactions: list[Transaction] = []
+        for row in rows:
+            instrument = None
+            if row.instrument_id is not None:
+                instrument_record = self.session.get(InstrumentRecord, row.instrument_id)
+                if instrument_record is not None:
+                    instrument = _instrument_from_record(
+                        instrument_record,
+                        _instrument_identifiers(self.session, row.instrument_id),
+                    )
+            transactions.append(
+                Transaction(
+                    transaction_id=row.transaction_id,
+                    account_id=row.account_id,
+                    provider=row.provider,
+                    external_id=row.external_id,
+                    occurred_at=_normalize_utc_timestamp(row.occurred_at),
+                    transaction_type=TransactionType(row.transaction_type),
+                    currency=row.currency,
+                    symbol=row.symbol,
+                    instrument=instrument,
+                    quantity=row.quantity,
+                    unit_price=row.unit_price,
+                    gross_amount=row.gross_amount,
+                    fees=row.fees,
+                    taxes=row.taxes,
+                    net_cash=row.net_cash,
+                    description=row.description,
+                )
+            )
+        return transactions
+
+
+class BrokerReconciliationRepository:
+    def __init__(self, session: Session) -> None:
+        self.session = session
+
+    def upsert(self, reconciliation: BrokerReconciliation) -> None:
+        record = self.session.get(
+            BrokerReconciliationRecord,
+            reconciliation.reconciliation_id,
+        )
+        if record is None:
+            record = BrokerReconciliationRecord(
+                reconciliation_id=reconciliation.reconciliation_id
+            )
+            self.session.add(record)
+        record.account_id = reconciliation.account_id
+        record.provider = reconciliation.provider
+        record.observed_at = _normalize_utc_timestamp(reconciliation.observed_at)
+        record.currency = reconciliation.currency
+        record.broker_nav = reconciliation.broker_nav
+        record.calculated_nav = reconciliation.calculated_nav
+        record.nav_difference = reconciliation.nav_difference
+        record.broker_cash = reconciliation.broker_cash
+        record.calculated_cash = reconciliation.calculated_cash
+        record.cash_difference = reconciliation.cash_difference
+        record.status = reconciliation.status.value
+
+    def latest_by_account(self) -> list[BrokerReconciliation]:
+        rows = self.session.scalars(
+            select(BrokerReconciliationRecord).order_by(
+                BrokerReconciliationRecord.observed_at.desc()
+            )
+        ).all()
+        latest: dict[str, BrokerReconciliationRecord] = {}
+        for row in rows:
+            latest.setdefault(row.account_id, row)
+        return [
+            BrokerReconciliation(
+                reconciliation_id=row.reconciliation_id,
+                account_id=row.account_id,
+                provider=row.provider,
+                observed_at=_normalize_utc_timestamp(row.observed_at),
+                currency=row.currency,
+                broker_nav=row.broker_nav,
+                calculated_nav=row.calculated_nav,
+                nav_difference=row.nav_difference,
+                broker_cash=row.broker_cash,
+                calculated_cash=row.calculated_cash,
+                cash_difference=row.cash_difference,
+                status=ReconciliationStatus(row.status),
+            )
+            for row in latest.values()
+        ]
+
+
+class ProviderRunRepository:
+    def __init__(self, session: Session) -> None:
+        self.session = session
+
+    def upsert(self, run: ProviderRun) -> None:
+        record = self.session.get(ProviderRunRecord, run.run_id)
+        if record is None:
+            record = ProviderRunRecord(run_id=run.run_id)
+            self.session.add(record)
+        record.provider = run.provider
+        record.operation = run.operation
+        record.status = run.status.value
+        record.started_at = _normalize_utc_timestamp(run.started_at)
+        record.finished_at = (
+            _normalize_utc_timestamp(run.finished_at)
+            if run.finished_at is not None
+            else None
+        )
+        record.records_read = run.records_read
+        record.records_written = run.records_written
+        record.warning_count = run.warning_count
+        record.error_message = run.error_message
+
+    def latest_by_provider(self) -> list[ProviderRun]:
+        rows = self.session.scalars(
+            select(ProviderRunRecord).order_by(ProviderRunRecord.started_at.desc())
+        ).all()
+        latest: dict[tuple[str, str], ProviderRunRecord] = {}
+        for row in rows:
+            latest.setdefault((row.provider, row.operation), row)
+        return [
+            ProviderRun(
+                run_id=row.run_id,
+                provider=row.provider,
+                operation=row.operation,
+                status=ProviderRunStatus(row.status),
+                started_at=_normalize_utc_timestamp(row.started_at),
+                finished_at=(
+                    _normalize_utc_timestamp(row.finished_at)
+                    if row.finished_at is not None
+                    else None
+                ),
+                records_read=row.records_read,
+                records_written=row.records_written,
+                warning_count=row.warning_count,
+                error_message=row.error_message,
+            )
+            for row in latest.values()
         ]

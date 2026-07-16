@@ -264,11 +264,24 @@ class NotionSync:
                 self.account_external_id(account),
                 self.build_account_payload(account, positions),
             )
+        portfolio_nav = sum(
+            (
+                item.reporting_market_value
+                for item in positions
+                if item.reporting_market_value is not None
+            ),
+            Decimal("0"),
+        )
         for position in positions:
+            payload = self.build_position_payload(position)
+            if portfolio_nav and position.reporting_market_value is not None:
+                payload.properties["Portfolio Weight"] = NotionPropertyValue.number(
+                    abs(position.reporting_market_value) / portfolio_nav
+                )
             self.client.upsert_page(
                 "Positions",
                 self.position_external_id(position),
-                self.build_position_payload(position),
+                payload,
             )
 
     def build_signal_payload(self, signal: Signal) -> NotionPagePayload:
@@ -301,17 +314,40 @@ class NotionSync:
 
     def build_daily_review_payload(self, result: DailyReviewResult) -> NotionPagePayload:
         snapshot = result.snapshot
+        previous_nav, nav_change, nav_change_percent = self._daily_change(result)
+        properties = {
+            "Review Date": NotionPropertyValue.date(snapshot.observed_at.date()),
+            "Snapshot ID": NotionPropertyValue.rich_text(snapshot.snapshot_id),
+            "NAV": NotionPropertyValue.number(self._round_money(snapshot.nav)),
+            "Gross Exposure": NotionPropertyValue.number(
+                self._round_money(snapshot.gross_exposure)
+            ),
+            "Net Exposure": NotionPropertyValue.number(
+                self._round_money(snapshot.net_exposure)
+            ),
+            "Unrealized PnL": NotionPropertyValue.number(
+                self._round_money(snapshot.unrealized_pnl)
+            ),
+            "Signal Count": NotionPropertyValue.number(len(result.signals)),
+            "Reporting Currency": NotionPropertyValue.select(snapshot.base_currency),
+            "Reporting Coverage": NotionPropertyValue.number(
+                snapshot.reporting_coverage
+            ),
+        }
+        if previous_nav is not None and nav_change is not None:
+            properties["Previous NAV"] = NotionPropertyValue.number(
+                self._round_money(previous_nav)
+            )
+            properties["Daily Change"] = NotionPropertyValue.number(
+                self._round_money(nav_change)
+            )
+        if nav_change_percent is not None:
+            properties["Daily Change %"] = NotionPropertyValue.number(
+                nav_change_percent
+            )
         return NotionPagePayload(
             title=f"Daily Review {snapshot.observed_at.date().isoformat()}",
-            properties={
-                "Review Date": NotionPropertyValue.date(snapshot.observed_at.date()),
-                "Snapshot ID": NotionPropertyValue.rich_text(snapshot.snapshot_id),
-                "NAV": NotionPropertyValue.number(snapshot.nav),
-                "Gross Exposure": NotionPropertyValue.number(snapshot.gross_exposure),
-                "Net Exposure": NotionPropertyValue.number(snapshot.net_exposure),
-                "Unrealized PnL": NotionPropertyValue.number(snapshot.unrealized_pnl),
-                "Signal Count": NotionPropertyValue.number(len(result.signals)),
-            },
+            properties=properties,
             body=self._build_daily_review_body(result),
         )
 
@@ -356,6 +392,7 @@ class NotionSync:
     @classmethod
     def _build_daily_review_body(cls, result: DailyReviewResult) -> str:
         snapshot = result.snapshot
+        _, nav_change, nav_change_percent = cls._daily_change(result)
         lines = [
             "Overview",
             f"- Snapshot Time: {snapshot.observed_at.isoformat()}",
@@ -363,10 +400,25 @@ class NotionSync:
             f"- Signal Count: {len(result.signals)}",
             "",
             "Portfolio",
-            f"- NAV: {cls._format_decimal(snapshot.nav)}",
-            f"- Gross Exposure: {cls._format_decimal(snapshot.gross_exposure)}",
-            f"- Net Exposure: {cls._format_decimal(snapshot.net_exposure)}",
-            f"- Unrealized PnL: {cls._format_decimal(snapshot.unrealized_pnl)}",
+            f"- NAV: {cls._format_money(snapshot.nav, snapshot.base_currency)}",
+            (
+                "- Daily Change: unavailable until a prior-day real snapshot exists"
+                if nav_change is None
+                else f"- Daily Change: {cls._format_money(nav_change, snapshot.base_currency)} "
+                f"({cls._format_percent(nav_change_percent or Decimal('0'))})*"
+            ),
+            (
+                "- Gross Exposure: "
+                f"{cls._format_money(snapshot.gross_exposure, snapshot.base_currency)}"
+            ),
+            (
+                "- Net Exposure: "
+                f"{cls._format_money(snapshot.net_exposure, snapshot.base_currency)}"
+            ),
+            (
+                "- Unrealized PnL: "
+                f"{cls._format_money(snapshot.unrealized_pnl, snapshot.base_currency)}"
+            ),
             f"- Reporting Currency: {snapshot.base_currency}",
             f"- Reporting Coverage: {cls._format_percent(snapshot.reporting_coverage)}",
             "",
@@ -376,13 +428,14 @@ class NotionSync:
             "Allocation",
             *cls._allocation_lines(result.positions, snapshot.nav),
             "",
-            "Top Holdings",
-            *cls._top_holding_lines(result.positions, snapshot.nav),
+            "Holdings",
+            *cls._holding_lines(result.positions, snapshot.nav, snapshot.base_currency),
             "",
             "Signals",
             *cls._signal_summary_lines(result),
             "",
             "Next",
+            "- *Daily Change is NAV movement and is not yet adjusted for cash flows.",
             "- News overview section reserved for a future agent pass.",
         ]
         return "\n".join(lines)
@@ -442,12 +495,11 @@ class NotionSync:
         ]
 
     @classmethod
-    def _top_holding_lines(
+    def _holding_lines(
         cls,
         positions: list[Position],
         portfolio_nav: Decimal,
-        *,
-        limit: int = 5,
+        base_currency: str,
     ) -> list[str]:
         if portfolio_nav == 0 or not positions:
             return ["- No holdings available."]
@@ -471,12 +523,13 @@ class NotionSync:
             ),
             key=lambda item: abs(item[1]),
             reverse=True,
-        )[:limit]
+        )
         return [
             (
                 f"- {position.instrument.symbol} "
                 f"({cls._asset_class_label(position.instrument.asset_class)}, "
                 f"{position.instrument.currency}) - "
+                f"{cls._format_money(value, base_currency)}, "
                 f"{cls._format_percent(abs(value) / portfolio_nav)} "
                 "of portfolio"
             )
@@ -513,3 +566,23 @@ class NotionSync:
     @staticmethod
     def _format_percent(value: Decimal) -> str:
         return f"{(value * Decimal('100')).quantize(Decimal('0.1'))}%"
+
+    @staticmethod
+    def _round_money(value: Decimal) -> Decimal:
+        return value.quantize(Decimal("0.01"))
+
+    @classmethod
+    def _format_money(cls, value: Decimal, currency: str) -> str:
+        rounded = cls._round_money(value)
+        return f"{currency} {rounded:,.2f}"
+
+    @staticmethod
+    def _daily_change(
+        result: DailyReviewResult,
+    ) -> tuple[Decimal | None, Decimal | None, Decimal | None]:
+        previous = result.previous_daily_snapshot
+        if previous is None or previous.base_currency != result.snapshot.base_currency:
+            return None, None, None
+        change = result.snapshot.nav - previous.nav
+        percent = None if previous.nav == 0 else change / previous.nav
+        return previous.nav, change, percent

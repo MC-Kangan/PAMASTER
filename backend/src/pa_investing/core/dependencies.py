@@ -1,4 +1,5 @@
 from collections.abc import Iterator
+from dataclasses import dataclass
 from functools import lru_cache
 from typing import Annotated
 
@@ -9,12 +10,15 @@ from pa_investing.db.repositories import (
     AccountRepository,
     AppSettingRepository,
     AuditEventRepository,
+    BrokerReconciliationRepository,
     FxRateRepository,
     MarketDataMappingRepository,
     PortfolioSnapshotRepository,
     PositionRepository,
     PriceRepository,
+    ProviderRunRepository,
     SignalRepository,
+    TransactionRepository,
 )
 from pa_investing.db.session import DatabaseSessionFactory
 from pa_investing.market_data.alpha_vantage import AlphaVantageProvider
@@ -26,6 +30,20 @@ from pa_investing.notion.live import LiveNotionClient
 from pa_investing.notion.sync import NotionSync
 from pa_investing.workflows.daily_review import DailyReviewPersistence, DailyReviewWorkflow
 from pa_investing.workflows.refresh_and_sync import RefreshAndSyncWorkflow
+
+
+@dataclass(frozen=True)
+class PortfolioAnalysisContext:
+    position_repository: PositionRepository
+    app_setting_repository: AppSettingRepository
+    fx_rate_repository: FxRateRepository
+
+
+@dataclass(frozen=True)
+class OperationsAnalysisContext:
+    transaction_repository: TransactionRepository
+    reconciliation_repository: BrokerReconciliationRepository
+    provider_run_repository: ProviderRunRepository
 
 
 @lru_cache
@@ -75,6 +93,7 @@ def get_refresh_and_sync_workflow(
     session_factory = get_database_session_factory()
     with session_factory.session() as session:
         notion_sync = NotionSync(client=notion_client)
+        snapshot_repository = PortfolioSnapshotRepository(session)
         yield RefreshAndSyncWorkflow(
             position_repository=PositionRepository(session),
             price_repository=PriceRepository(session),
@@ -83,7 +102,7 @@ def get_refresh_and_sync_workflow(
                 notion_sync=notion_sync,
                 persistence=DailyReviewPersistence(
                     audit_event_repository=AuditEventRepository(session),
-                    snapshot_repository=PortfolioSnapshotRepository(session),
+                    snapshot_repository=snapshot_repository,
                     signal_repository=SignalRepository(session),
                 ),
             ),
@@ -93,6 +112,10 @@ def get_refresh_and_sync_workflow(
             app_setting_repository=AppSettingRepository(session),
             market_data_mapping_repository=MarketDataMappingRepository(session),
             fx_rate_repository=FxRateRepository(session),
+            snapshot_repository=snapshot_repository,
+            provider_run_repository=ProviderRunRepository(session),
+            rollback=getattr(session, "rollback", None),
+            notion_provider_name="notion" if get_settings().notion_enabled else None,
             default_base_currency=get_settings().default_base_currency,
         )
 
@@ -101,3 +124,23 @@ def get_portfolio_snapshot_repository() -> Iterator[PortfolioSnapshotRepository]
     session_factory = get_database_session_factory()
     with session_factory.session() as session:
         yield PortfolioSnapshotRepository(session)
+
+
+def get_portfolio_analysis_context() -> Iterator[PortfolioAnalysisContext]:
+    session_factory = get_database_session_factory()
+    with session_factory.session() as session:
+        yield PortfolioAnalysisContext(
+            position_repository=PositionRepository(session),
+            app_setting_repository=AppSettingRepository(session),
+            fx_rate_repository=FxRateRepository(session),
+        )
+
+
+def get_operations_analysis_context() -> Iterator[OperationsAnalysisContext]:
+    session_factory = get_database_session_factory()
+    with session_factory.session() as session:
+        yield OperationsAnalysisContext(
+            transaction_repository=TransactionRepository(session),
+            reconciliation_repository=BrokerReconciliationRepository(session),
+            provider_run_repository=ProviderRunRepository(session),
+        )

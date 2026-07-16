@@ -6,10 +6,13 @@ from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 from pa_investing.domain.enums import (
     AssetClass,
     CostBasisStatus,
+    ProviderRunStatus,
     QuoteQuality,
+    ReconciliationStatus,
     SignalSeverity,
     SignalStatus,
     SignalType,
+    TransactionType,
 )
 
 
@@ -248,3 +251,60 @@ class Signal(BaseModel):
     audit_id: str
     created_at: datetime
     analytics_path: str | None = None
+
+
+class Transaction(BaseModel):
+    transaction_id: str
+    account_id: str
+    provider: str
+    external_id: str
+    occurred_at: datetime
+    transaction_type: TransactionType
+    currency: str
+    symbol: str | None = None
+    instrument: Instrument | None = None
+    quantity: Decimal = Decimal("0")
+    unit_price: Decimal | None = None
+    gross_amount: Decimal = Decimal("0")
+    fees: Decimal = Decimal("0")
+    taxes: Decimal = Decimal("0")
+    net_cash: Decimal = Decimal("0")
+    description: str | None = None
+
+    @field_validator("currency")
+    @classmethod
+    def uppercase_transaction_currency(cls, value: str) -> str:
+        return value.upper()
+
+
+class BrokerReconciliation(BaseModel):
+    reconciliation_id: str
+    account_id: str
+    provider: str
+    observed_at: datetime
+    currency: str
+    broker_nav: Decimal
+    calculated_nav: Decimal
+    nav_difference: Decimal
+    broker_cash: Decimal
+    calculated_cash: Decimal
+    cash_difference: Decimal
+    status: ReconciliationStatus
+
+    @field_validator("currency")
+    @classmethod
+    def uppercase_reconciliation_currency(cls, value: str) -> str:
+        return value.upper()
+
+
+class ProviderRun(BaseModel):
+    run_id: str
+    provider: str
+    operation: str
+    status: ProviderRunStatus
+    started_at: datetime
+    finished_at: datetime | None = None
+    records_read: int = 0
+    records_written: int = 0
+    warning_count: int = 0
+    error_message: str | None = None

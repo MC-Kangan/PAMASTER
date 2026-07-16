@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
 
 from pydantic import BaseModel
@@ -72,3 +72,12 @@ def build_performance_history(snapshots: list[PortfolioSnapshot]) -> Performance
         simple_return=points[-1].simple_return,
         max_drawdown=max_drawdown,
     )
+
+
+def latest_snapshot_per_day(
+    snapshots: list[PortfolioSnapshot],
+) -> list[PortfolioSnapshot]:
+    latest: dict[tuple[date, str], PortfolioSnapshot] = {}
+    for snapshot in sorted(snapshots, key=lambda item: item.observed_at):
+        latest[(snapshot.observed_at.date(), snapshot.base_currency)] = snapshot
+    return sorted(latest.values(), key=lambda item: item.observed_at)

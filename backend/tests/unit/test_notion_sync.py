@@ -96,6 +96,15 @@ def test_notion_sync_builds_daily_review_payload() -> None:
                 analytics_path="/analysis/signal/sig-1",
             )
         ],
+        previous_daily_snapshot=PortfolioSnapshot(
+            snapshot_id="snap-previous",
+            observed_at=datetime(2026, 7, 7, tzinfo=UTC),
+            base_currency="USD",
+            nav=Decimal("8800"),
+            gross_exposure=Decimal("8800"),
+            net_exposure=Decimal("8800"),
+            unrealized_pnl=Decimal("-1200"),
+        ),
     )
     sync = NotionSync(client=FakeNotionClient())
 
@@ -108,12 +117,20 @@ def test_notion_sync_builds_daily_review_payload() -> None:
         result.snapshot.observed_at.date()
     )
     assert payload.properties["Signal Count"] == NotionPropertyValue.number(1)
-    assert payload.properties["NAV"] == NotionPropertyValue.number(Decimal("9000"))
+    assert payload.properties["NAV"] == NotionPropertyValue.number(Decimal("9000.00"))
+    assert payload.properties["Previous NAV"] == NotionPropertyValue.number(
+        Decimal("8800.00")
+    )
+    assert payload.properties["Daily Change"] == NotionPropertyValue.number(
+        Decimal("200.00")
+    )
     assert "Overview" in payload.body
     assert "Allocation" in payload.body
-    assert "Top Holdings" in payload.body
-    assert "AAPL (Equity, USD) - 13.3% of portfolio" in payload.body
-    assert "SGLN (ETF, GBP) - 23.3% of portfolio" in payload.body
+    assert "Holdings" in payload.body
+    assert "NAV: USD 9,000.00" in payload.body
+    assert "Daily Change: USD 200.00 (2.3%)*" in payload.body
+    assert "AAPL (Equity, USD) - USD 1,200.00, 13.3% of portfolio" in payload.body
+    assert "SGLN (ETF, GBP) - USD 2,100.00, 23.3% of portfolio" in payload.body
     assert "No signals generated." not in payload.body
     assert "Reduce 10 shares" in payload.body
 

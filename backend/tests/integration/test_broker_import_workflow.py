@@ -1,32 +1,70 @@
 from datetime import UTC, datetime
 from decimal import Decimal
 
+import pytest
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 
 from pa_investing.brokers.interfaces import BrokerConnector
 from pa_investing.db.base import Base
-from pa_investing.db.models import InstrumentRecord, PositionRecord, PriceRecord
+from pa_investing.db.models import (
+    BrokerReconciliationRecord,
+    InstrumentRecord,
+    PositionRecord,
+    PriceRecord,
+    ProviderRunRecord,
+    TransactionRecord,
+)
 from pa_investing.db.repositories import (
     AccountRepository,
+    BrokerReconciliationRepository,
     PositionRepository,
     PriceRepository,
+    ProviderRunRepository,
+    TransactionRepository,
 )
-from pa_investing.domain.enums import AssetClass, CostBasisStatus, QuoteQuality
-from pa_investing.domain.models import Account, Instrument, Position
+from pa_investing.domain.enums import (
+    AssetClass,
+    CostBasisStatus,
+    ProviderRunStatus,
+    QuoteQuality,
+    ReconciliationStatus,
+    TransactionType,
+)
+from pa_investing.domain.models import (
+    Account,
+    BrokerReconciliation,
+    Instrument,
+    Position,
+    Transaction,
+)
 from pa_investing.workflows.broker_import import BrokerImportWorkflow
 
 
 class StubBrokerConnector(BrokerConnector):
-    def __init__(self, accounts: list[Account], positions: list[Position]) -> None:
+    def __init__(
+        self,
+        accounts: list[Account],
+        positions: list[Position],
+        transactions: list[Transaction] | None = None,
+        reconciliations: list[BrokerReconciliation] | None = None,
+    ) -> None:
         self._accounts = accounts
         self._positions = positions
+        self._transactions = transactions or []
+        self._reconciliations = reconciliations or []
 
     def list_accounts(self) -> list[Account]:
         return self._accounts
 
     def fetch_positions(self) -> list[Position]:
         return self._positions
+
+    def fetch_transactions(self) -> list[Transaction]:
+        return self._transactions
+
+    def fetch_reconciliations(self) -> list[BrokerReconciliation]:
+        return self._reconciliations
 
 
 def test_broker_import_workflow_overwrites_matching_account_positions() -> None:
@@ -197,3 +235,139 @@ def test_broker_import_workflow_fails_when_no_supported_accounts_or_positions_ar
             assert str(error) == "IBKR import returned no supported accounts or positions"
         else:
             raise AssertionError("Expected broker import to fail")
+
+
+def test_broker_import_persists_ledger_reconciliation_and_provider_health() -> None:
+    engine = create_engine("sqlite+pysqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    session_factory = sessionmaker(bind=engine)
+    observed_at = datetime(2026, 7, 10, tzinfo=UTC)
+    instrument = Instrument(
+        symbol="SPGI",
+        name="S&P Global",
+        asset_class=AssetClass.EQUITY,
+        currency="USD",
+    )
+
+    with session_factory() as session:
+        workflow = BrokerImportWorkflow(
+            connector=StubBrokerConnector(
+                accounts=[
+                    Account(
+                        account_id="U1",
+                        name="IBKR",
+                        source="ibkr-flex",
+                        base_currency="GBP",
+                    )
+                ],
+                positions=[
+                    Position(
+                        account_id="U1",
+                        instrument=instrument,
+                        quantity=Decimal("2"),
+                        average_cost=Decimal("430"),
+                        latest_price=Decimal("450"),
+                        cost_basis_status=CostBasisStatus.BROKER,
+                    )
+                ],
+                transactions=[
+                    Transaction(
+                        transaction_id="ibkr-flex:U1:tx-1",
+                        account_id="U1",
+                        provider="ibkr-flex",
+                        external_id="tx-1",
+                        occurred_at=observed_at,
+                        transaction_type=TransactionType.BUY,
+                        currency="USD",
+                        symbol="SPGI",
+                        instrument=instrument,
+                        quantity=Decimal("2"),
+                        unit_price=Decimal("430"),
+                        gross_amount=Decimal("-860"),
+                        fees=Decimal("-1"),
+                        net_cash=Decimal("-861"),
+                    )
+                ],
+                reconciliations=[
+                    BrokerReconciliation(
+                        reconciliation_id="ibkr-flex:U1:20260710",
+                        account_id="U1",
+                        provider="ibkr-flex",
+                        observed_at=observed_at,
+                        currency="GBP",
+                        broker_nav=Decimal("1000"),
+                        calculated_nav=Decimal("1000"),
+                        nav_difference=Decimal("0"),
+                        broker_cash=Decimal("100"),
+                        calculated_cash=Decimal("100"),
+                        cash_difference=Decimal("0"),
+                        status=ReconciliationStatus.MATCHED,
+                    )
+                ],
+            ),
+            account_repository=AccountRepository(session),
+            position_repository=PositionRepository(session),
+            transaction_repository=TransactionRepository(session),
+            reconciliation_repository=BrokerReconciliationRepository(session),
+            provider_run_repository=ProviderRunRepository(session),
+            commit=session.commit,
+            rollback=session.rollback,
+            clock=lambda: observed_at,
+        )
+
+        first = workflow.run()
+        second = workflow.run()
+
+        transactions = session.scalars(select(TransactionRecord)).all()
+        reconciliations = session.scalars(
+            select(BrokerReconciliationRecord)
+        ).all()
+        provider_runs = session.scalars(select(ProviderRunRecord)).all()
+
+    assert first.transactions_imported == 1
+    assert first.reconciliations_imported == 1
+    assert second.transactions_imported == 1
+    assert len(transactions) == 1
+    assert len(reconciliations) == 1
+    assert len(provider_runs) == 2
+    assert {run.status for run in provider_runs} == {
+        ProviderRunStatus.SUCCESS.value
+    }
+
+
+def test_broker_import_persists_failed_provider_run_after_rollback() -> None:
+    class FailingConnector(StubBrokerConnector):
+        def fetch_positions(self) -> list[Position]:
+            raise RuntimeError("broker unavailable")
+
+    engine = create_engine("sqlite+pysqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    session_factory = sessionmaker(bind=engine)
+
+    with session_factory() as session:
+        workflow = BrokerImportWorkflow(
+            connector=FailingConnector(
+                accounts=[
+                    Account(
+                        account_id="U1",
+                        name="IBKR",
+                        source="ibkr-flex",
+                    )
+                ],
+                positions=[],
+            ),
+            account_repository=AccountRepository(session),
+            position_repository=PositionRepository(session),
+            provider_run_repository=ProviderRunRepository(session),
+            commit=session.commit,
+            rollback=session.rollback,
+        )
+
+        with pytest.raises(RuntimeError, match="broker unavailable"):
+            workflow.run()
+
+        runs = ProviderRunRepository(session).latest_by_provider()
+
+    assert len(runs) == 1
+    assert runs[0].status == ProviderRunStatus.FAILED
+    assert runs[0].error_message == "broker unavailable"
