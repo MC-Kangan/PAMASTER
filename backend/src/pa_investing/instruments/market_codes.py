@@ -1,6 +1,37 @@
 import re
 from dataclasses import dataclass
 
+CANONICAL_VENUE_ALIASES = {
+    "NASDAQ": "XNAS",
+    "NMS": "XNAS",
+    "NGM": "XNAS",
+    "NCM": "XNAS",
+    "XNAS": "XNAS",
+    "NYSE": "XNYS",
+    "NYQ": "XNYS",
+    "XNYS": "XNYS",
+    "NYSE ARCA": "ARCX",
+    "ARCX": "ARCX",
+    "AMEX": "XASE",
+    "ASE": "XASE",
+    "XASE": "XASE",
+    "LSE": "XLON",
+    "LONDON STOCK EXCHANGE": "XLON",
+    "XLON": "XLON",
+    "XETRA": "XETR",
+    "XETR": "XETR",
+    "EURONEXT PARIS": "XPAR",
+    "XPAR": "XPAR",
+    "EURONEXT AMSTERDAM": "XAMS",
+    "XAMS": "XAMS",
+    "SIX": "XSWX",
+    "XSWX": "XSWX",
+    "MILAN": "XMIL",
+    "XMIL": "XMIL",
+    "MADRID": "XMAD",
+    "XMAD": "XMAD",
+}
+
 
 @dataclass(frozen=True)
 class MarketDefinition:
@@ -39,6 +70,22 @@ class MarketCodeRegistry:
         return self._exchanges.get(normalized) or self._aliases.get(
             self._normalize_token(normalized)
         )
+
+    def listing_identity(
+        self,
+        exchange: str | None,
+        mic_code: str | None,
+    ) -> str | None:
+        if mic_code:
+            normalized_mic = mic_code.strip().upper()
+            return CANONICAL_VENUE_ALIASES.get(normalized_mic, normalized_mic)
+        if exchange:
+            normalized_exchange = exchange.strip().upper()
+            return CANONICAL_VENUE_ALIASES.get(
+                normalized_exchange,
+                normalized_exchange,
+            )
+        return None
 
 DEFAULT_MARKET_CODES = MarketCodeRegistry(
     (

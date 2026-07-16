@@ -164,3 +164,32 @@ def test_market_code_resolution_falls_back_to_mic() -> None:
 
     assert result.unambiguous is True
     assert result.candidates[0].canonical_reference == "GLEN LN"
+
+
+def test_research_search_merges_equivalent_provider_venue_labels() -> None:
+    yahoo = _candidate(
+        symbol="GLEN",
+        exchange="LSE",
+        provider="yahoo",
+        provider_symbol="GLEN.L",
+        currency="GBP",
+    )
+    twelve = _candidate(
+        symbol="GLEN",
+        exchange="London Stock Exchange",
+        provider="twelve_data",
+        provider_symbol="GLEN",
+        currency="GBP",
+    ).model_copy(update={"mic_code": "XLON"})
+    service = InstrumentResolutionService(
+        session=None,
+        searchers=[StubSearcher([yahoo]), StubSearcher([twelve])],
+    )
+
+    result = service.search("GLEN LN")
+
+    assert result.unambiguous is True
+    assert result.candidates[0].provider_symbols == {
+        "yahoo": "GLEN.L",
+        "twelve_data": "GLEN",
+    }

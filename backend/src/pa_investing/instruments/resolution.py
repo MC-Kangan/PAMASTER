@@ -46,6 +46,12 @@ class InstrumentCandidate(BaseModel):
             self.exchange
         ) or DEFAULT_MARKET_CODES.market_for_exchange(self.mic_code)
 
+    def listing_identity(self) -> str | None:
+        return DEFAULT_MARKET_CODES.listing_identity(
+            self.exchange,
+            self.mic_code,
+        )
+
     @computed_field
     @property
     def canonical_reference(self) -> str:
@@ -165,7 +171,7 @@ class InstrumentResolutionService:
                         continue
                 key = (
                     candidate.display_symbol,
-                    candidate.exchange or "",
+                    candidate.listing_identity() or "",
                     candidate.currency,
                     candidate.asset_class,
                 )
@@ -195,6 +201,7 @@ class InstrumentResolutionService:
                                 **existing.provider_ids,
                                 **candidate.provider_ids,
                             },
+                            "mic_code": existing.mic_code or candidate.mic_code,
                             "confidence": max(
                                 existing.confidence,
                                 candidate.confidence,

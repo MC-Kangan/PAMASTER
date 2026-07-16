@@ -131,7 +131,7 @@ class AnalysisResult(BaseModel):
     as_of: date
     dataset_id: str
     provider: str
-    completed_through: date
+    completed_through: date | None
     stale: bool = False
     data_warnings: list[str] = Field(default_factory=list)
     provider_attempts: list[ProviderAttempt] = Field(default_factory=list)

@@ -140,7 +140,6 @@ class FinanceAnalysisService:
         return self.orchestrator.run(
             request,
             bounded_dataset,
-            completed_through=completed_through,
             stale=market_data.stale,
             data_warnings=tuple(market_data.dataset.warnings),
             provider_attempts=tuple(market_data.attempts),

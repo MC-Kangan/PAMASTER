@@ -203,3 +203,44 @@ def test_finance_service_excludes_current_incomplete_daily_bar() -> None:
     assert result.completed_through == date(2026, 7, 15)
     assert result.skill_results[0].metrics["bar_count"] == 1
     assert result.stale is True
+
+
+def test_completed_through_is_last_bar_actually_analyzed() -> None:
+    dataset = HistoricalDataset(
+        dataset_id="dataset-1",
+        series_key="portfolio|instrument-1|all",
+        provider="yahoo",
+        provider_symbol="ADBE",
+        provider_exchange="NASDAQ",
+        currency="USD",
+        fetched_at=datetime(2026, 7, 16, tzinfo=UTC),
+        bars=[
+            DailyBar(
+                trading_date=date(2026, 7, 10),
+                open=Decimal("99"),
+                high=Decimal("102"),
+                low=Decimal("98"),
+                close=Decimal("101"),
+                adjustment_mode=AdjustmentMode.ALL,
+            )
+        ],
+    )
+    history = RecordingHistoryService(dataset)
+    history.stale = True
+    registry = SkillRegistry()
+    registry.register(EchoSkill())
+    registry.register_bundle("daily_market_review.v1", ("echo.v1",))
+    service = FinanceAnalysisService(
+        resolver=StubResolver(_instrument(InstrumentScope.PORTFOLIO)),
+        historical_data=history,
+        orchestrator=FinanceOrchestrator(registry),
+        today=lambda: date(2026, 7, 20),
+    )
+
+    result = service.analyze_portfolio(
+        "instrument-1",
+        as_of=date(2026, 7, 20),
+        allow_stale=True,
+    )
+
+    assert result.completed_through == date(2026, 7, 10)

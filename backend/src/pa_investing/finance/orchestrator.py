@@ -1,4 +1,3 @@
-from datetime import date
 
 from pa_investing.finance.models import (
     AnalysisRequest,
@@ -23,7 +22,6 @@ class FinanceOrchestrator:
         request: AnalysisRequest,
         dataset: HistoricalDataset,
         *,
-        completed_through: date | None = None,
         stale: bool = False,
         data_warnings: tuple[str, ...] = (),
         provider_attempts: tuple[ProviderAttempt, ...] = (),
@@ -85,12 +83,7 @@ class FinanceOrchestrator:
             dataset_id=dataset.dataset_id,
             provider=dataset.provider,
             completed_through=(
-                completed_through
-                or (
-                    dataset.bars[-1].trading_date
-                    if dataset.bars
-                    else request.as_of
-                )
+                dataset.bars[-1].trading_date if dataset.bars else None
             ),
             stale=stale,
             data_warnings=list(data_warnings),
