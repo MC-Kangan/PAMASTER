@@ -143,3 +143,28 @@ def test_yahoo_rejects_empty_or_zero_close_frames() -> None:
     with pytest.raises(HistoricalProviderError) as invalid:
         zero_close_provider.fetch_daily(_request())
     assert invalid.value.code == "invalid_adjustment_factor"
+
+
+def test_yahoo_ignores_provider_placeholder_rows_with_missing_prices() -> None:
+    provider = YahooHistoricalDataProvider(
+        downloader=lambda **kwargs: pd.DataFrame(
+            {
+                "Open": [100.0, float("nan")],
+                "High": [105.0, float("nan")],
+                "Low": [95.0, float("nan")],
+                "Close": [101.0, float("nan")],
+                "Adj Close": [101.0, float("nan")],
+                "Volume": [1000, float("nan")],
+            },
+            index=pd.to_datetime(["2026-07-13", "2026-07-14"]),
+        ),
+        metadata_loader=lambda symbol: {
+            "symbol": symbol,
+            "currency": "GBP",
+            "exchange": "LSE",
+        },
+    )
+
+    dataset = provider.fetch_daily(_request())
+
+    assert [bar.trading_date for bar in dataset.bars] == [date(2026, 7, 13)]

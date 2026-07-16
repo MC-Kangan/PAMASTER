@@ -123,6 +123,12 @@ class YahooHistoricalDataProvider:
                 code="malformed_response",
                 message=f"Yahoo response is missing OHLC adjustment columns for {symbol}",
             )
+        frame = frame.dropna(subset=sorted(required_columns))
+        if frame.empty:
+            raise HistoricalProviderError(
+                code="empty_response",
+                message=f"Yahoo returned no complete daily bars for {symbol}",
+            )
 
         adjusted_bars: list[DailyBar] = []
         raw_bars: list[DailyBar] = []
