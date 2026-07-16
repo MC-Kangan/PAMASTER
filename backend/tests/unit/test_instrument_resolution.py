@@ -141,7 +141,7 @@ def test_research_search_accepts_bloomberg_style_market_code() -> None:
 
     result = service.search("adbe us")
 
-    assert searcher.queries == ["ADBE"]
+    assert searcher.queries == ["adbe us"]
     assert result.unambiguous is True
     assert result.candidates[0].canonical_reference == "ADBE US"
     assert result.candidates[0].model_dump()["canonical_reference"] == "ADBE US"
@@ -192,4 +192,31 @@ def test_research_search_merges_equivalent_provider_venue_labels() -> None:
     assert result.candidates[0].provider_symbols == {
         "yahoo": "GLEN.L",
         "twelve_data": "GLEN",
+    }
+
+
+def test_research_search_merges_nasdaq_market_tier_mics() -> None:
+    yahoo = _candidate(
+        symbol="ADBE",
+        exchange="NASDAQ",
+        provider="yahoo",
+        provider_symbol="ADBE",
+    )
+    twelve = _candidate(
+        symbol="ADBE",
+        exchange="NASDAQ",
+        provider="twelve_data",
+        provider_symbol="ADBE",
+    ).model_copy(update={"mic_code": "XNGS"})
+    service = InstrumentResolutionService(
+        session=None,
+        searchers=[StubSearcher([yahoo]), StubSearcher([twelve])],
+    )
+
+    result = service.search("ADBE US")
+
+    assert result.unambiguous is True
+    assert result.candidates[0].provider_symbols == {
+        "yahoo": "ADBE",
+        "twelve_data": "ADBE",
     }

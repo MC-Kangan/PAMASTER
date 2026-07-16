@@ -89,6 +89,43 @@ def test_yahoo_searcher_skips_result_when_required_metadata_is_unavailable() -> 
     assert searcher.search("ADBE") == []
 
 
+def test_yahoo_searcher_does_not_enrich_unrelated_search_results() -> None:
+    loaded_symbols: list[str] = []
+    searcher = YahooInstrumentSearcher(
+        search=lambda _query: [
+            {
+                "symbol": "ADBE",
+                "quoteType": "EQUITY",
+                "exchange": "NMS",
+            },
+            {
+                "symbol": "ADBE261218P00400000",
+                "quoteType": "OPTION",
+                "exchange": "OPR",
+            },
+            {
+                "symbol": "ADBE.SW",
+                "quoteType": "EQUITY",
+                "exchange": "EBS",
+            },
+        ],
+        metadata_loader=lambda symbol: (
+            loaded_symbols.append(symbol)
+            or {
+                "currency": "USD",
+                "exchangeName": "NMS",
+            }
+        ),
+    )
+
+    candidates = searcher.search("ADBE US")
+
+    assert [candidate.provider_symbols["yahoo"] for candidate in candidates] == [
+        "ADBE"
+    ]
+    assert loaded_symbols == ["ADBE"]
+
+
 def test_twelve_data_searcher_parses_candidates_and_error_envelopes() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         assert request.headers["Authorization"] == "apikey test-key"

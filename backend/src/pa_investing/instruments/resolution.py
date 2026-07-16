@@ -160,7 +160,7 @@ class InstrumentResolutionService:
                 market_filter = DEFAULT_MARKET_CODES.normalize(exchange_filter)
         merged: dict[tuple[str, str, str, str], InstrumentCandidate] = {}
         for searcher in self.searchers:
-            for candidate in searcher.search(symbol_query or query):
+            for candidate in searcher.search(query):
                 if symbol_query and candidate.display_symbol != symbol_query:
                     continue
                 if exchange_filter:

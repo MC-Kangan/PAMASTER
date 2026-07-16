@@ -1,4 +1,5 @@
 from collections.abc import Callable
+from contextlib import suppress
 from decimal import Decimal
 
 import httpx
@@ -39,6 +40,24 @@ def _yahoo_display_symbol(symbol: str, market_code: str | None) -> str:
     return normalized
 
 
+def _yahoo_symbol_market(symbol: str) -> str | None:
+    normalized = symbol.strip().upper()
+    for market_code, suffixes in YAHOO_MARKET_SUFFIXES.items():
+        if any(normalized.endswith(suffix) for suffix in suffixes):
+            return market_code
+    return None
+
+
+def _search_terms(query: str) -> tuple[str, str | None]:
+    tokens = query.strip().upper().split()
+    symbol = tokens[0] if tokens else ""
+    market_code: str | None = None
+    if len(tokens) > 1:
+        with suppress(ValueError):
+            market_code = DEFAULT_MARKET_CODES.normalize(tokens[1])
+    return symbol, market_code
+
+
 def _asset_class(value: object) -> str:
     normalized = str(value or "").strip().lower()
     if normalized in {"equity", "common stock", "stock"}:
@@ -62,14 +81,29 @@ class YahooInstrumentSearcher:
         self._metadata_loader = metadata_loader or self._default_metadata
 
     def search(self, query: str) -> list[InstrumentCandidate]:
+        symbol_query, market_filter = _search_terms(query)
         try:
-            results = self._search(query)
+            results = self._search(symbol_query)
         except Exception:
             return []
         candidates: list[InstrumentCandidate] = []
         for result in results:
             symbol = str(result.get("symbol") or "").strip()
             if not symbol:
+                continue
+            asset_class = _asset_class(result.get("quoteType"))
+            if asset_class not in {"equity", "etf", "crypto"}:
+                continue
+            if symbol.upper() != symbol_query and not symbol.upper().startswith(
+                f"{symbol_query}."
+            ):
+                continue
+            result_market = _yahoo_symbol_market(symbol)
+            if (
+                market_filter
+                and result_market
+                and result_market != market_filter
+            ):
                 continue
             metadata: dict[str, object] = {}
             if not result.get("currency") or not result.get("exchange"):
@@ -93,12 +127,14 @@ class YahooInstrumentSearcher:
                 provider_exchange or None,
             )
             market_code = DEFAULT_MARKET_CODES.market_for_exchange(exchange)
+            if market_filter and market_code and market_code != market_filter:
+                continue
             display_symbol = _yahoo_display_symbol(symbol, market_code)
             candidates.append(
                 InstrumentCandidate(
                     display_symbol=display_symbol,
                     name=str(result.get("shortname") or result.get("longname") or symbol),
-                    asset_class=_asset_class(result.get("quoteType")),
+                    asset_class=asset_class,
                     currency=currency,
                     exchange=exchange,
                     mic_code=None,
@@ -155,6 +191,7 @@ class TwelveDataInstrumentSearcher:
     def search(self, query: str) -> list[InstrumentCandidate]:
         if not self.api_key:
             return []
+        symbol_query, _market_filter = _search_terms(query)
         try:
             with httpx.Client(
                 transport=self.transport,
@@ -163,7 +200,7 @@ class TwelveDataInstrumentSearcher:
             ) as client:
                 response = client.get(
                     f"{self.base_url}/symbol_search",
-                    params={"symbol": query, "outputsize": "30"},
+                    params={"symbol": symbol_query, "outputsize": "30"},
                 )
                 response.raise_for_status()
                 payload = response.json()
