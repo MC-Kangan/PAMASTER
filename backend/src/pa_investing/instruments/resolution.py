@@ -13,6 +13,10 @@ from pa_investing.db.models import (
 )
 from pa_investing.db.repositories import HistoricalDataRepository
 from pa_investing.domain.enums import InstrumentScope
+from pa_investing.instruments.market_codes import (
+    CanonicalInstrumentReference,
+    DEFAULT_MARKET_CODES,
+)
 from pa_investing.market_data.history.models import HistoricalInstrumentRef
 
 
@@ -29,6 +33,18 @@ class InstrumentCandidate(BaseModel):
     provider_price_multipliers: dict[str, Decimal] = Field(default_factory=dict)
     provider_ids: dict[str, str] = Field(default_factory=dict)
     confidence: Decimal
+
+    @property
+    def canonical_reference(self) -> str:
+        market_code = DEFAULT_MARKET_CODES.market_for_exchange(self.exchange)
+        if market_code is None:
+            return self.display_symbol
+        return str(
+            CanonicalInstrumentReference(
+                symbol=self.display_symbol,
+                market_code=market_code,
+            )
+        )
 
     @field_validator("display_symbol", "currency")
     @classmethod
@@ -123,13 +139,28 @@ class InstrumentResolutionService:
         tokens = query.strip().upper().split()
         symbol_query = tokens[0] if tokens else ""
         exchange_filter = tokens[1] if len(tokens) > 1 else None
+        market_filter: str | None = None
+        if exchange_filter:
+            try:
+                market_filter = DEFAULT_MARKET_CODES.normalize(exchange_filter)
+            except ValueError:
+                pass
         merged: dict[tuple[str, str, str, str], InstrumentCandidate] = {}
         for searcher in self.searchers:
             for candidate in searcher.search(query):
                 if symbol_query and candidate.display_symbol != symbol_query:
                     continue
-                if exchange_filter and candidate.exchange != exchange_filter:
-                    continue
+                if exchange_filter:
+                    if market_filter:
+                        if (
+                            DEFAULT_MARKET_CODES.market_for_exchange(
+                                candidate.exchange
+                            )
+                            != market_filter
+                        ):
+                            continue
+                    elif candidate.exchange != exchange_filter:
+                        continue
                 key = (
                     candidate.display_symbol,
                     candidate.exchange or "",

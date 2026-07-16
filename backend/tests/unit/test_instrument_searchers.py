@@ -32,6 +32,26 @@ def test_yahoo_searcher_normalizes_listing_and_preserves_provider_venue() -> Non
     }
 
 
+def test_yahoo_searcher_uses_provider_symbol_only_for_provider_mapping() -> None:
+    searcher = YahooInstrumentSearcher(
+        search=lambda _query: [
+            {
+                "symbol": "GLEN.L",
+                "shortname": "Glencore plc",
+                "quoteType": "EQUITY",
+                "exchange": "LSE",
+                "currency": "GBP",
+            }
+        ]
+    )
+
+    candidate = searcher.search("GLEN LN")[0]
+
+    assert candidate.display_symbol == "GLEN"
+    assert candidate.canonical_reference == "GLEN LN"
+    assert candidate.provider_symbols == {"yahoo": "GLEN.L"}
+
+
 def test_twelve_data_searcher_parses_candidates_and_error_envelopes() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         assert request.headers["Authorization"] == "apikey test-key"

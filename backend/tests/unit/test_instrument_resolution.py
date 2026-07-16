@@ -112,3 +112,33 @@ def test_research_search_returns_ambiguity_until_listing_is_selected() -> None:
     assert narrowed.candidates[0].exchange == "LSE"
     with pytest.raises(ValueError, match="ambiguous"):
         service.require_unambiguous(ambiguous)
+
+
+def test_research_search_accepts_bloomberg_style_market_code() -> None:
+    service = InstrumentResolutionService(
+        session=None,
+        searchers=[
+            StubSearcher(
+                [
+                    _candidate(
+                        symbol="ADBE",
+                        exchange="NASDAQ",
+                        provider="yahoo",
+                        provider_symbol="ADBE",
+                    ),
+                    _candidate(
+                        symbol="ADBE",
+                        exchange="LSE",
+                        provider="yahoo",
+                        provider_symbol="0R2Y.L",
+                        currency="GBP",
+                    ),
+                ]
+            )
+        ],
+    )
+
+    result = service.search("adbe us")
+
+    assert result.unambiguous is True
+    assert result.candidates[0].canonical_reference == "ADBE US"
