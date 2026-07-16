@@ -16,6 +16,8 @@ class HistoricalInstrumentRef(BaseModel):
     instrument_id: str | None = None
     provider_symbols: dict[str, str] = Field(default_factory=dict)
     provider_exchanges: dict[str, str] = Field(default_factory=dict)
+    provider_currencies: dict[str, str] = Field(default_factory=dict)
+    provider_price_multipliers: dict[str, Decimal] = Field(default_factory=dict)
     provider_ids: dict[str, str] = Field(default_factory=dict)
 
     @field_validator("display_symbol", "currency")

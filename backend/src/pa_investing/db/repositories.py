@@ -273,6 +273,11 @@ class HistoricalDataRepository:
         provider_identity = {
             "symbols": instrument.provider_symbols,
             "exchanges": instrument.provider_exchanges,
+            "currencies": instrument.provider_currencies,
+            "price_multipliers": {
+                provider: str(multiplier)
+                for provider, multiplier in instrument.provider_price_multipliers.items()
+            },
             "ids": instrument.provider_ids,
         }
         if series is None:

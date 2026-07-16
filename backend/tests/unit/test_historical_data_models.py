@@ -20,6 +20,8 @@ def test_research_request_has_stable_identity_without_permanent_instrument() -> 
         currency="usd",
         exchange="nasdaq",
         provider_symbols={"yahoo": "NVDA", "twelve_data": "NVDA"},
+        provider_currencies={"twelve_data": "USD"},
+        provider_price_multipliers={"twelve_data": Decimal("1")},
     )
 
     request = HistoricalDataRequest(
@@ -31,6 +33,7 @@ def test_research_request_has_stable_identity_without_permanent_instrument() -> 
     assert request.instrument.instrument_id is None
     assert request.instrument.currency == "USD"
     assert request.instrument.exchange == "NASDAQ"
+    assert request.instrument.provider_price_multipliers["twelve_data"] == Decimal("1")
     assert request.interval == "1d"
     assert request.required_adjustment == AdjustmentMode.ALL
     assert request.series_key == "research|NVDA|NASDAQ|USD|all"
