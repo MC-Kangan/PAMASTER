@@ -99,6 +99,29 @@ def test_daily_review_collects_independent_finance_evidence_for_unique_supported
     assert result.finance_evidence[1].error == "history unavailable"
 
 
+def test_daily_review_can_defer_finance_evidence_until_after_portfolio_commit() -> None:
+    analyzer = RecordingFinanceAnalyzer()
+    workflow = DailyReviewWorkflow(
+        notion_sync=NotionSync(client=FakeNotionClient()),
+        finance_analyzer=analyzer,
+    )
+    positions = [_position("ADBE", "adbe-id", AssetClass.EQUITY)]
+
+    result = workflow.run(
+        positions=positions,
+        stop_prices={},
+        include_finance_evidence=False,
+    )
+
+    assert analyzer.calls == []
+    assert result.finance_evidence == []
+
+    workflow.enrich_finance_evidence(result)
+
+    assert [call[0] for call in analyzer.calls] == ["adbe-id"]
+    assert result.finance_evidence[0].analysis is not None
+
+
 def test_daily_review_workflow_imports_positions_generates_signal_and_syncs_notion() -> None:
     positions = CsvPositionImporter().import_positions(
         path=Path("tests/fixtures/positions_sample.csv")

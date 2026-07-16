@@ -73,18 +73,23 @@ class DailyReviewWorkflow:
         *,
         sync_signals: bool = True,
         base_currency: str = "USD",
+        include_finance_evidence: bool = True,
     ) -> DailyReviewResult:
         result = self.agent_api.run_daily_review(
             positions=positions,
             stop_prices=stop_prices,
             base_currency=base_currency,
         )
-        result.finance_evidence = self._collect_finance_evidence(result)
+        if include_finance_evidence:
+            self.enrich_finance_evidence(result)
         if self.persistence is not None:
             self.persistence.persist(result)
         if sync_signals:
             self.sync_signals(result)
         return result
+
+    def enrich_finance_evidence(self, result: DailyReviewResult) -> None:
+        result.finance_evidence = self._collect_finance_evidence(result)
 
     def _collect_finance_evidence(
         self,

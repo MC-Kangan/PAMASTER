@@ -94,6 +94,7 @@ class RefreshAndSyncWorkflow:
                 stop_prices=stop_prices,
                 sync_signals=False,
                 base_currency=base_currency,
+                include_finance_evidence=False,
             )
             result.previous_daily_snapshot = self._previous_daily_snapshot(result)
             self._finish_provider_run(
@@ -113,6 +114,8 @@ class RefreshAndSyncWorkflow:
             )
             self.commit()
             raise
+
+        self.daily_review_workflow.enrich_finance_evidence(result)
 
         notion_run = None
         if self.notion_provider_name is not None:
