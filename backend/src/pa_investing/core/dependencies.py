@@ -22,6 +22,9 @@ from pa_investing.db.repositories import (
     TransactionRepository,
 )
 from pa_investing.db.session import DatabaseSessionFactory
+from pa_investing.finance.defaults import build_default_finance_registry
+from pa_investing.finance.orchestrator import FinanceOrchestrator
+from pa_investing.finance.service import FinanceAnalysisService
 from pa_investing.instruments.resolution import InstrumentResolutionService
 from pa_investing.instruments.searchers import (
     TwelveDataInstrumentSearcher,
@@ -103,9 +106,31 @@ def get_refresh_and_sync_workflow(
     notion_client: Annotated[NotionClient, Depends(get_notion_client)],
 ) -> Iterator[RefreshAndSyncWorkflow]:
     session_factory = get_database_session_factory()
-    with session_factory.session() as session:
+    settings = get_settings()
+    with (
+        session_factory.session() as session,
+        session_factory.session() as finance_session,
+    ):
         notion_sync = NotionSync(client=notion_client)
         snapshot_repository = PortfolioSnapshotRepository(session)
+        finance_resolver = InstrumentResolutionService(session=finance_session)
+        finance_analyzer = FinanceAnalysisService(
+            resolver=finance_resolver,
+            historical_data=HistoricalDataService(
+                session=finance_session,
+                repository=HistoricalDataRepository(finance_session),
+                resolver=finance_resolver,
+                router=HistoricalDataRouter(
+                    [
+                        YahooHistoricalDataProvider(),
+                        TwelveDataHistoricalDataProvider(
+                            api_key=settings.twelve_data_api_key
+                        ),
+                    ]
+                ),
+            ),
+            orchestrator=FinanceOrchestrator(build_default_finance_registry()),
+        )
         yield RefreshAndSyncWorkflow(
             position_repository=PositionRepository(session),
             price_repository=PriceRepository(session),
@@ -117,6 +142,7 @@ def get_refresh_and_sync_workflow(
                     snapshot_repository=snapshot_repository,
                     signal_repository=SignalRepository(session),
                 ),
+                finance_analyzer=finance_analyzer,
             ),
             notion_sync=notion_sync,
             commit=session.commit,
@@ -127,8 +153,8 @@ def get_refresh_and_sync_workflow(
             snapshot_repository=snapshot_repository,
             provider_run_repository=ProviderRunRepository(session),
             rollback=getattr(session, "rollback", None),
-            notion_provider_name="notion" if get_settings().notion_enabled else None,
-            default_base_currency=get_settings().default_base_currency,
+            notion_provider_name="notion" if settings.notion_enabled else None,
+            default_base_currency=settings.default_base_currency,
         )
 
 

@@ -5,6 +5,7 @@ from pa_investing.domain.models import Signal
 from pa_investing.notion.client import FakeNotionClient
 from pa_investing.notion.schemas import (
     NotionDatabaseSchema,
+    NotionPagePayload,
     NotionPropertyValue,
     NotionSchemaError,
 )
@@ -63,3 +64,22 @@ def test_notion_property_value_serializes_date_for_date_properties() -> None:
             "start": "2026-07-13",
         }
     }
+
+
+def test_notion_page_payload_chunks_long_dashboard_body_without_losing_text() -> None:
+    body = "A" * 1999 + "\n" + "B" * 1999
+    payload = NotionPagePayload(title="Review", properties={}, body=body)
+    schema = NotionDatabaseSchema(
+        title_property_name="Name",
+        external_id_property_name="External ID",
+        properties={"Name": "title", "External ID": "rich_text"},
+    )
+
+    create_body = payload.to_notion_create_body("database-id", "review-id", schema)
+    update_body = payload.to_notion_block_update_body()
+    create_parts = create_body["children"][0]["paragraph"]["rich_text"]
+    update_parts = update_body["paragraph"]["rich_text"]
+
+    assert all(len(part["text"]["content"]) <= 2000 for part in create_parts)
+    assert "".join(part["text"]["content"] for part in create_parts) == body
+    assert update_parts == create_parts

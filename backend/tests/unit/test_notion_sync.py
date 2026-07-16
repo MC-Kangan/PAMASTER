@@ -1,18 +1,21 @@
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from decimal import Decimal
 
 from pa_investing.domain.enums import (
     AssetClass,
     CostBasisStatus,
+    InstrumentScope,
     SignalSeverity,
     SignalStatus,
     SignalType,
 )
 from pa_investing.domain.models import Account, Instrument, PortfolioSnapshot, Position, Signal
+from pa_investing.finance.models import AnalysisResult, AnalysisStatus
+from pa_investing.market_data.history.models import HistoricalInstrumentRef
 from pa_investing.notion.client import FakeNotionClient
 from pa_investing.notion.schemas import NotionDatabaseRow, NotionPropertyValue
 from pa_investing.notion.sync import NotionSync
-from pa_investing.workflows.agent_api import DailyReviewResult
+from pa_investing.workflows.agent_api import DailyReviewResult, FinanceEvidence
 
 
 def test_notion_sync_writes_signal_payload_to_fake_client() -> None:
@@ -128,9 +131,9 @@ def test_notion_sync_builds_daily_review_payload() -> None:
     assert "Allocation" in payload.body
     assert "Holdings" in payload.body
     assert "NAV: USD 9,000.00" in payload.body
-    assert "Daily Change: USD 200.00 (2.3%)*" in payload.body
-    assert "AAPL (Equity, USD) - USD 1,200.00, 13.3% of portfolio" in payload.body
-    assert "SGLN (ETF, GBP) - USD 2,100.00, 23.3% of portfolio" in payload.body
+    assert "Daily Change: USD 200.00 (2.27%)*" in payload.body
+    assert "AAPL (Equity, USD) - USD 1,200.00, 13.33% of portfolio" in payload.body
+    assert "SGLN (ETF, GBP) - USD 2,100.00, 23.33% of portfolio" in payload.body
     assert "No signals generated." not in payload.body
     assert "Reduce 10 shares" in payload.body
 
@@ -245,6 +248,152 @@ def test_portfolio_payloads_never_write_user_owned_fields() -> None:
     )
     assert stored_account.properties["Position Count"] == NotionPropertyValue.number(1)
     assert "GBP: 210" in stored_account.body
+
+
+def test_portfolio_payload_rounds_every_numeric_field_for_notion_display() -> None:
+    client = FakeNotionClient(
+        configured_databases={"Settings", "Accounts", "Positions"}
+    )
+    sync = NotionSync(client)
+    account = Account(
+        account_id="U123",
+        name="IBKR",
+        source="ibkr_flex",
+        base_currency="GBP",
+    )
+    first = Position(
+        account_id="U123",
+        instrument=Instrument(
+            instrument_id="adbe-id",
+            symbol="ADBE",
+            name="Adobe",
+            asset_class=AssetClass.EQUITY,
+            currency="USD",
+        ),
+        quantity=Decimal("3.12345678"),
+        average_cost=Decimal("299.123456"),
+        broker_average_cost=Decimal("298.987654"),
+        cost_basis_status=CostBasisStatus.BROKER,
+        latest_price=Decimal("300.987654"),
+        reporting_currency="GBP",
+        fx_rate=Decimal("0.74123456789"),
+    )
+    second = Position(
+        account_id="U123",
+        instrument=Instrument(
+            instrument_id="cash-id",
+            symbol="CASH.GBP",
+            name="Cash",
+            asset_class=AssetClass.CASH,
+            currency="GBP",
+        ),
+        quantity=Decimal("100.123456"),
+        average_cost=Decimal("1"),
+        latest_price=Decimal("1"),
+        reporting_currency="GBP",
+        fx_rate=Decimal("1"),
+    )
+
+    sync.sync_portfolio([account], [first, second])
+
+    position = client.pages["Positions"]["position:U123:adbe-id"]
+    account_page = client.pages["Accounts"]["account:U123"]
+    assert position.properties["Quantity"] == NotionPropertyValue.number(
+        Decimal("3.1235")
+    )
+    assert position.properties["Price"] == NotionPropertyValue.number(
+        Decimal("300.9877")
+    )
+    assert position.properties["Effective Cost"] == NotionPropertyValue.number(
+        Decimal("299.1235")
+    )
+    assert position.properties["Broker Cost"] == NotionPropertyValue.number(
+        Decimal("298.9877")
+    )
+    assert position.properties["FX Rate"] == NotionPropertyValue.number(
+        Decimal("0.741235")
+    )
+    assert position.properties["Market Value"] == NotionPropertyValue.number(
+        Decimal("940.12")
+    )
+    assert position.properties["Reporting Market Value"] == NotionPropertyValue.number(
+        Decimal("696.85")
+    )
+    assert position.properties["Portfolio Weight"] == NotionPropertyValue.number(
+        Decimal("0.8744")
+    )
+    assert account_page.properties["Reporting Market Value"] == NotionPropertyValue.number(
+        Decimal("796.97")
+    )
+    assert account_page.properties["Reporting Coverage"] == NotionPropertyValue.number(
+        Decimal("1.0000")
+    )
+    assert "USD: 940.12" in account_page.body
+    assert "Quantity: 3.1235" in position.body
+
+
+def test_daily_review_renders_finance_evidence_separately_from_signals() -> None:
+    as_of = datetime(2026, 7, 16, tzinfo=UTC)
+    analysis = AnalysisResult(
+        status=AnalysisStatus.SUCCESS,
+        instrument=HistoricalInstrumentRef(
+            scope=InstrumentScope.PORTFOLIO,
+            instrument_id="adbe-id",
+            display_symbol="ADBE",
+            asset_class="equity",
+            currency="USD",
+            provider_symbols={"yahoo": "ADBE"},
+        ),
+        as_of=as_of.date(),
+        dataset_id="dataset-adbe",
+        provider="yahoo",
+        completed_through=date(2026, 7, 15),
+        data_warnings=[
+            "missing expected session: 2026-07-03",
+            "missing expected session: 2026-07-04",
+        ],
+        skill_results=[],
+        summary=[
+            "[WARNING] Market data: missing expected session: 2026-07-03",
+            "[WARNING] Market data: missing expected session: 2026-07-04",
+            "[WATCH] Technical snapshot: Trend remains positive.",
+        ],
+    )
+    result = DailyReviewResult(
+        snapshot=PortfolioSnapshot(
+            snapshot_id="snap-finance",
+            observed_at=as_of,
+            base_currency="GBP",
+            nav=Decimal("1000"),
+            gross_exposure=Decimal("1000"),
+            net_exposure=Decimal("1000"),
+            unrealized_pnl=Decimal("0"),
+        ),
+        positions=[],
+        signals=[],
+        finance_evidence=[
+            FinanceEvidence(
+                instrument_id="adbe-id",
+                symbol="ADBE",
+                analysis=analysis,
+            ),
+            FinanceEvidence(
+                instrument_id="msft-id",
+                symbol="MSFT",
+                error="history unavailable",
+            ),
+        ],
+    )
+
+    payload = NotionSync(FakeNotionClient()).build_daily_review_payload(result)
+
+    assert "Market Analysis" in payload.body
+    assert "ADBE — Success; Yahoo; data through 2026-07-15" in payload.body
+    assert "Technical snapshot: Trend remains positive." in payload.body
+    assert "2 data-quality warnings; inspect provider audit for details." in payload.body
+    assert "missing expected session" not in payload.body
+    assert "MSFT — Unavailable: history unavailable" in payload.body
+    assert "Evidence only; no PA signal was generated from this section." in payload.body
 
 
 def test_reporting_payload_makes_stale_and_missing_fx_visible() -> None:

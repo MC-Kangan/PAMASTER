@@ -17,10 +17,18 @@ class StubSession:
 class StubSessionFactory:
     def __init__(self, session: StubSession) -> None:
         self.session_instance = session
+        self.finance_session = StubSession()
+        self.session_count = 0
 
     @contextmanager
     def session(self) -> Iterator[StubSession]:
-        yield self.session_instance
+        selected = (
+            self.session_instance
+            if self.session_count == 0
+            else self.finance_session
+        )
+        self.session_count += 1
+        yield selected
 
 
 def _workflow_dependency(
@@ -46,6 +54,11 @@ def test_refresh_and_sync_workflow_dependency_injects_commit_into_workflow(
 
     workflow = next(dependency)
 
+    assert workflow.daily_review_workflow.finance_analyzer is not None
+    assert (
+        workflow.daily_review_workflow.finance_analyzer.historical_data.session
+        is not session
+    )
     workflow.commit()
 
     session.commit.assert_called_once_with()

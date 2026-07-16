@@ -1,6 +1,6 @@
 import logging
 from dataclasses import dataclass, field
-from decimal import Decimal
+from decimal import ROUND_HALF_UP, Decimal
 
 from pa_investing.analytics.metrics import calculate_exposure_by_currency
 from pa_investing.domain.enums import AssetClass, CostBasisStatus
@@ -109,7 +109,7 @@ class NotionSync:
         exposure = calculate_exposure_by_currency(account_positions)
         currencies = sorted(exposure)
         breakdown = [
-            f"- {currency}: {self._format_decimal(value)}"
+            f"- {currency}: {self._format_number(value, Decimal('0.01'))}"
             for currency, value in sorted(exposure.items())
         ] or ["- No open positions."]
         reporting_values = [
@@ -136,14 +136,16 @@ class NotionSync:
             "Base Currency": NotionPropertyValue.select(account.base_currency),
             "Position Count": NotionPropertyValue.number(len(account_positions)),
             "Currencies": NotionPropertyValue.rich_text(", ".join(currencies)),
-            "Reporting Coverage": NotionPropertyValue.number(reporting_coverage),
+            "Reporting Coverage": NotionPropertyValue.number(
+                self._round_ratio(reporting_coverage)
+            ),
         }
         if reporting_values and reporting_currency:
             account_properties["Reporting Currency"] = NotionPropertyValue.select(
                 reporting_currency
             )
             account_properties["Reporting Market Value"] = NotionPropertyValue.number(
-                sum(reporting_values, Decimal("0"))
+                self._round_money(sum(reporting_values, Decimal("0")))
             )
         return NotionPagePayload(
             title=account.name,
@@ -173,13 +175,19 @@ class NotionSync:
             "Asset Class": NotionPropertyValue.select(
                 position.instrument.asset_class.value
             ),
-            "Quantity": NotionPropertyValue.number(position.quantity),
+            "Quantity": NotionPropertyValue.number(
+                self._round_quantity(position.quantity)
+            ),
             "Currency": NotionPropertyValue.select(position.instrument.currency),
-            "Market Value": NotionPropertyValue.number(position.market_value),
+            "Market Value": NotionPropertyValue.number(
+                self._round_money(position.market_value)
+            ),
             "Cost Status": NotionPropertyValue.select(position.cost_basis_status.value),
-            "Effective Cost": NotionPropertyValue.number(position.average_cost),
+            "Effective Cost": NotionPropertyValue.number(
+                self._round_price(position.average_cost)
+            ),
             "Broker Cost": NotionPropertyValue.number(
-                position.broker_average_cost or Decimal("0")
+                self._round_price(position.broker_average_cost or Decimal("0"))
             ),
         }
         if position.instrument.instrument_id is not None:
@@ -191,7 +199,9 @@ class NotionSync:
                 position.instrument.venue
             )
         if position.latest_price is not None:
-            properties["Price"] = NotionPropertyValue.number(position.latest_price)
+            properties["Price"] = NotionPropertyValue.number(
+                self._round_price(position.latest_price)
+            )
         if position.latest_price_observed_at is not None:
             properties["Price As Of"] = NotionPropertyValue.rich_text(
                 position.latest_price_observed_at.isoformat()
@@ -209,7 +219,9 @@ class NotionSync:
                 position.reporting_currency
             )
         if position.fx_rate is not None:
-            properties["FX Rate"] = NotionPropertyValue.number(position.fx_rate)
+            properties["FX Rate"] = NotionPropertyValue.number(
+                self._round_fx(position.fx_rate)
+            )
         if position.fx_observed_at is not None:
             properties["FX As Of"] = NotionPropertyValue.rich_text(
                 position.fx_observed_at.isoformat()
@@ -220,15 +232,15 @@ class NotionSync:
             )
         if position.reporting_market_value is not None:
             properties["Reporting Market Value"] = NotionPropertyValue.number(
-                position.reporting_market_value
+                self._round_money(position.reporting_market_value)
             )
         if position.reporting_unrealized_pnl is not None:
             properties["Reporting Unrealized PnL"] = NotionPropertyValue.number(
-                position.reporting_unrealized_pnl
+                self._round_money(position.reporting_unrealized_pnl)
             )
         if position.cost_basis_status != CostBasisStatus.UNAVAILABLE:
             properties["Unrealized PnL"] = NotionPropertyValue.number(
-                position.unrealized_pnl
+                self._round_money(position.unrealized_pnl)
             )
 
         return NotionPagePayload(
@@ -239,7 +251,7 @@ class NotionSync:
                     "Position Overview",
                     f"- Account: {position.account_id}",
                     f"- Instrument: {position.instrument.name}",
-                    f"- Quantity: {self._format_decimal(position.quantity)}",
+                    f"- Quantity: {self._format_number(position.quantity, Decimal('0.0001'))}",
                     f"- Currency: {position.instrument.currency}",
                     f"- Cost Status: {self._humanize_token(position.cost_basis_status.value)}",
                 ]
@@ -276,7 +288,9 @@ class NotionSync:
             payload = self.build_position_payload(position)
             if portfolio_nav and position.reporting_market_value is not None:
                 payload.properties["Portfolio Weight"] = NotionPropertyValue.number(
-                    abs(position.reporting_market_value) / portfolio_nav
+                    self._round_ratio(
+                        abs(position.reporting_market_value) / portfolio_nav
+                    )
                 )
             self.client.upsert_page(
                 "Positions",
@@ -331,7 +345,7 @@ class NotionSync:
             "Signal Count": NotionPropertyValue.number(len(result.signals)),
             "Reporting Currency": NotionPropertyValue.select(snapshot.base_currency),
             "Reporting Coverage": NotionPropertyValue.number(
-                snapshot.reporting_coverage
+                self._round_ratio(snapshot.reporting_coverage)
             ),
         }
         if previous_nav is not None and nav_change is not None:
@@ -343,7 +357,7 @@ class NotionSync:
             )
         if nav_change_percent is not None:
             properties["Daily Change %"] = NotionPropertyValue.number(
-                nav_change_percent
+                self._round_ratio(nav_change_percent)
             )
         return NotionPagePayload(
             title=f"Daily Review {snapshot.observed_at.date().isoformat()}",
@@ -364,8 +378,8 @@ class NotionSync:
         )
 
     @staticmethod
-    def _format_decimal(value: Decimal) -> str:
-        return serialize_decimal(value)
+    def _format_number(value: Decimal, quantum: Decimal) -> str:
+        return serialize_decimal(value.quantize(quantum, rounding=ROUND_HALF_UP))
 
     @classmethod
     def _build_signal_body(cls, signal: Signal) -> str:
@@ -433,6 +447,9 @@ class NotionSync:
             "",
             "Signals",
             *cls._signal_summary_lines(result),
+            "",
+            "Market Analysis",
+            *cls._finance_evidence_lines(result),
             "",
             "Next",
             "- *Daily Change is NAV movement and is not yet adjusted for cash flows.",
@@ -545,6 +562,48 @@ class NotionSync:
             for signal in result.signals
         ]
 
+    @classmethod
+    def _finance_evidence_lines(cls, result: DailyReviewResult) -> list[str]:
+        lines = ["- Evidence only; no PA signal was generated from this section."]
+        if not result.finance_evidence:
+            lines.append("- No finance analysis was run.")
+            return lines
+        for evidence in result.finance_evidence:
+            analysis = evidence.analysis
+            if analysis is None:
+                lines.append(
+                    f"- {evidence.symbol} — Unavailable: "
+                    f"{evidence.error or 'unknown error'}"
+                )
+                continue
+            status = cls._humanize_token(analysis.status.value)
+            provider = cls._humanize_token(analysis.provider)
+            completed = (
+                analysis.completed_through.isoformat()
+                if analysis.completed_through is not None
+                else "unavailable"
+            )
+            stale = "; stale" if analysis.stale else ""
+            lines.append(
+                f"- {evidence.symbol} — {status}; {provider}; "
+                f"data through {completed}{stale}"
+            )
+            summaries = [
+                summary
+                for summary in analysis.summary
+                if not summary.startswith("[WARNING] Market data:")
+            ]
+            lines.extend(f"  - {summary}" for summary in summaries)
+            if analysis.data_warnings:
+                warning_count = len(analysis.data_warnings)
+                lines.append(
+                    f"  - {warning_count} data-quality warnings; "
+                    "inspect provider audit for details."
+                )
+            if not summaries and not analysis.data_warnings:
+                lines.append("  - No notable findings.")
+        return lines
+
     @staticmethod
     def _humanize_token(value: str) -> str:
         return value.replace("_", " ").title()
@@ -565,11 +624,31 @@ class NotionSync:
 
     @staticmethod
     def _format_percent(value: Decimal) -> str:
-        return f"{(value * Decimal('100')).quantize(Decimal('0.1'))}%"
+        percentage = (value * Decimal("100")).quantize(
+            Decimal("0.01"),
+            rounding=ROUND_HALF_UP,
+        )
+        return f"{percentage}%"
 
     @staticmethod
     def _round_money(value: Decimal) -> Decimal:
-        return value.quantize(Decimal("0.01"))
+        return value.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+
+    @staticmethod
+    def _round_price(value: Decimal) -> Decimal:
+        return value.quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP)
+
+    @staticmethod
+    def _round_quantity(value: Decimal) -> Decimal:
+        return value.quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP)
+
+    @staticmethod
+    def _round_fx(value: Decimal) -> Decimal:
+        return value.quantize(Decimal("0.000001"), rounding=ROUND_HALF_UP)
+
+    @staticmethod
+    def _round_ratio(value: Decimal) -> Decimal:
+        return value.quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP)
 
     @classmethod
     def _format_money(cls, value: Decimal, currency: str) -> str:

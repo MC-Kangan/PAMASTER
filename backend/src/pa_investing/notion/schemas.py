@@ -167,14 +167,7 @@ class NotionPagePayload(BaseModel):
                     "object": "block",
                     "type": "paragraph",
                     "paragraph": {
-                        "rich_text": [
-                            {
-                                "type": "text",
-                                "text": {
-                                    "content": self.body,
-                                },
-                            }
-                        ]
+                        "rich_text": self._body_rich_text()
                     },
                 }
             ],
@@ -189,20 +182,19 @@ class NotionPagePayload(BaseModel):
             "properties": self.to_notion_properties(external_id=external_id, schema=schema),
         }
 
-    def to_notion_paragraph_block(self) -> dict[str, object]:
-        return {
-            "type": "text",
-            "text": {
-                "content": self.body,
-            },
-        }
+    def _body_rich_text(self) -> list[dict[str, object]]:
+        return [
+            {
+                "type": "text",
+                "text": {"content": self.body[offset : offset + 2000]},
+            }
+            for offset in range(0, max(len(self.body), 1), 2000)
+        ]
 
     def to_notion_block_update_body(self) -> dict[str, object]:
         return {
             "paragraph": {
-                "rich_text": [
-                    self.to_notion_paragraph_block(),
-                ]
+                "rich_text": self._body_rich_text()
             }
         }
 

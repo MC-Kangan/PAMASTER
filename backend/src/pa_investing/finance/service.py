@@ -61,10 +61,11 @@ class FinanceAnalysisService:
         allow_stale: bool = False,
     ) -> AnalysisResult:
         instrument = self.resolver.for_portfolio(instrument_id)
+        completed_through = self._completed_through(as_of)
         market_data = self.historical_data.get_for_portfolio(
             instrument_id,
             as_of - timedelta(days=lookback_days),
-            as_of,
+            completed_through,
             allow_stale=allow_stale,
         )
         return self._run(
@@ -88,10 +89,11 @@ class FinanceAnalysisService:
         threshold_overrides: dict[str, dict[str, Decimal]] | None = None,
         allow_stale: bool = False,
     ) -> AnalysisResult:
+        completed_through = self._completed_through(as_of)
         market_data = self.historical_data.get_for_research(
             instrument,
             as_of - timedelta(days=lookback_days),
-            as_of,
+            completed_through,
             allow_stale=allow_stale,
         )
         return self._run(
@@ -115,10 +117,7 @@ class FinanceAnalysisService:
         skill_ids: tuple[str, ...],
         threshold_overrides: dict[str, dict[str, Decimal]] | None,
     ) -> AnalysisResult:
-        completed_through = min(
-            as_of,
-            self.today() - timedelta(days=1),
-        )
+        completed_through = self._completed_through(as_of)
         start_date = as_of - timedelta(days=lookback_days)
         bounded_dataset = market_data.dataset.model_copy(
             update={
@@ -144,3 +143,6 @@ class FinanceAnalysisService:
             data_warnings=tuple(market_data.dataset.warnings),
             provider_attempts=tuple(market_data.attempts),
         )
+
+    def _completed_through(self, as_of: date) -> date:
+        return min(as_of, self.today() - timedelta(days=1))

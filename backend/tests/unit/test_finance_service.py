@@ -200,6 +200,13 @@ def test_finance_service_excludes_current_incomplete_daily_bar() -> None:
         allow_stale=True,
     )
 
+    assert history.calls == [
+        (
+            "instrument-1",
+            date(2026, 7, 16) - timedelta(days=365),
+            date(2026, 7, 15),
+        )
+    ]
     assert result.completed_through == date(2026, 7, 15)
     assert result.skill_results[0].metrics["bar_count"] == 1
     assert result.stale is True

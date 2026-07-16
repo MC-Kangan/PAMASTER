@@ -375,6 +375,12 @@ linked views for latest reviews, holdings, accounts, open signals, the review ca
 portfolio settings row. The source databases live under `PA Investing Data` to avoid duplicate
 tables on the operating page.
 
+The daily-review page also includes deterministic finance evidence for each mapped equity and ETF
+holding. This section records provider provenance, the last completed bar, notable findings, and
+isolated data failures; it does not create PA signals. Notion values are rounded only for display:
+money to two decimals, prices and quantities to four, percentage ratios to four (two percentage
+points when displayed as a percent), and FX rates to six. Stored calculations retain full precision.
+
 Successful refresh requests commit the updated prices, positions, snapshot, signals, and
 audit records before any Notion write begins. Performance history therefore survives across
 requests and application restarts when PostgreSQL is configured. If the database commit
