@@ -9,14 +9,18 @@ from pa_investing.db.base import Base
 from pa_investing.db.repositories import (
     AccountRepository,
     AppSettingRepository,
+    FxRateRepository,
+    MarketDataMappingRepository,
     PositionRepository,
     PriceRepository,
 )
 from pa_investing.domain.enums import AssetClass, CostBasisStatus
 from pa_investing.domain.models import (
     Account,
+    FxRatePoint,
     Instrument,
     InstrumentIdentifier,
+    MarketDataMapping,
     Position,
     PricePoint,
 )
@@ -308,3 +312,65 @@ def test_provider_identifier_resolves_existing_instrument_after_symbol_change() 
     assert len(stored) == 1
     assert stored[0].instrument.symbol == "NEW"
     assert stored[0].quantity == 2
+
+
+def test_market_data_mapping_and_fx_rate_repositories_round_trip() -> None:
+    engine = create_engine("sqlite+pysqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    session_factory = sessionmaker(bind=engine)
+    observed_at = datetime(2026, 7, 15, 12, tzinfo=UTC)
+
+    with session_factory() as session:
+        accounts = AccountRepository(session)
+        positions = PositionRepository(session)
+        accounts.upsert(Account(account_id="U1", name="IBKR", source="ibkr-flex"))
+        stored_position = positions.upsert_broker_position(
+            Position(
+                account_id="U1",
+                instrument=Instrument(
+                    symbol="SGLN",
+                    name="Gold ETC",
+                    asset_class=AssetClass.ETF,
+                    currency="GBP",
+                    venue="LSEETF",
+                ),
+                quantity=Decimal("10"),
+                average_cost=Decimal("50"),
+                cost_basis_status=CostBasisStatus.BROKER,
+            )
+        )
+        instrument_id = stored_position.instrument.instrument_id
+        assert instrument_id is not None
+        mapping_repository = MarketDataMappingRepository(session)
+        mapping_repository.upsert(
+            MarketDataMapping(
+                instrument_id=instrument_id,
+                provider="twelve_data",
+                provider_symbol="SGLN",
+                provider_exchange="LSE",
+                expected_currency="GBX",
+                price_multiplier=Decimal("0.01"),
+            )
+        )
+        fx_repository = FxRateRepository(session)
+        fx_repository.upsert(
+            FxRatePoint(
+                base_currency="GBP",
+                quote_currency="USD",
+                rate=Decimal("1.31"),
+                observed_at=observed_at,
+                provider="twelve_data",
+            )
+        )
+        session.commit()
+
+        mappings = mapping_repository.list_for_instruments(
+            {instrument_id},
+            "twelve_data",
+        )
+        rate = fx_repository.latest("GBP", "USD")
+
+    assert mappings[instrument_id].provider_exchange == "LSE"
+    assert mappings[instrument_id].price_multiplier == Decimal("0.010000000000")
+    assert rate is not None
+    assert rate.rate == Decimal("1.310000000000")

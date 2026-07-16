@@ -6,6 +6,7 @@ from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 from pa_investing.domain.enums import (
     AssetClass,
     CostBasisStatus,
+    QuoteQuality,
     SignalSeverity,
     SignalStatus,
     SignalType,
@@ -72,6 +73,14 @@ class Position(BaseModel):
     broker_average_cost: Decimal | None = None
     broker_cost_basis_status: CostBasisStatus | None = None
     manual_average_cost: Decimal | None = None
+    latest_price_observed_at: datetime | None = None
+    latest_price_provider: str | None = None
+    latest_price_quality: QuoteQuality | None = None
+    reporting_currency: str | None = None
+    fx_rate: Decimal | None = None
+    fx_observed_at: datetime | None = None
+    fx_provider: str | None = None
+    fx_stale: bool = False
 
     @model_validator(mode="after")
     def validate_cost_basis_fields(self) -> "Position":
@@ -113,18 +122,105 @@ class Position(BaseModel):
     def unrealized_pnl(self) -> Decimal:
         return self.market_value - self.cost_basis
 
+    @property
+    def reporting_market_value(self) -> Decimal | None:
+        if self.latest_price is None or self.fx_rate is None:
+            return None
+        return self.market_value * self.fx_rate
+
+    @property
+    def reporting_unrealized_pnl(self) -> Decimal | None:
+        if (
+            self.latest_price is None
+            or self.fx_rate is None
+            or self.cost_basis_status == CostBasisStatus.UNAVAILABLE
+        ):
+            return None
+        return self.unrealized_pnl * self.fx_rate
+
 
 class PricePoint(BaseModel):
     instrument: Instrument
     price: Decimal
     observed_at: datetime
     provider: str = "manual"
+    quote_currency: str | None = None
+    provider_symbol: str | None = None
+    provider_exchange: str | None = None
+    quality: QuoteQuality = QuoteQuality.DELAYED
 
     @field_validator("price")
     @classmethod
     def price_must_be_positive(cls, value: Decimal) -> Decimal:
         if value <= 0:
             raise ValueError("price must be positive")
+        return value
+
+    @model_validator(mode="after")
+    def normalize_quote_metadata(self) -> "PricePoint":
+        self.quote_currency = (
+            self.quote_currency or self.instrument.currency
+        ).upper()
+        return self
+
+
+class FxRatePoint(BaseModel):
+    base_currency: str
+    quote_currency: str
+    rate: Decimal
+    observed_at: datetime
+    provider: str
+
+    @field_validator("base_currency", "quote_currency")
+    @classmethod
+    def uppercase_currency(cls, value: str) -> str:
+        return value.upper()
+
+    @field_validator("rate")
+    @classmethod
+    def rate_must_be_positive(cls, value: Decimal) -> Decimal:
+        if value <= 0:
+            raise ValueError("FX rate must be positive")
+        return value
+
+
+class MarketDataMapping(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    instrument_id: str
+    provider: str
+    provider_symbol: str
+    expected_currency: str
+    provider_exchange: str | None = None
+    price_multiplier: Decimal = Decimal("1")
+    enabled: bool = True
+
+    @field_validator("instrument_id", "provider_symbol")
+    @classmethod
+    def nonempty_mapping_identifier(cls, value: str) -> str:
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("market-data mapping identifiers cannot be empty")
+        return normalized
+
+    @field_validator("provider")
+    @classmethod
+    def lowercase_provider(cls, value: str) -> str:
+        normalized = value.strip().lower()
+        if not normalized:
+            raise ValueError("market-data provider cannot be empty")
+        return normalized
+
+    @field_validator("expected_currency")
+    @classmethod
+    def uppercase_expected_currency(cls, value: str) -> str:
+        return value.upper()
+
+    @field_validator("price_multiplier")
+    @classmethod
+    def multiplier_must_be_positive(cls, value: Decimal) -> Decimal:
+        if value <= 0:
+            raise ValueError("price multiplier must be positive")
         return value
 
 
@@ -136,6 +232,9 @@ class PortfolioSnapshot(BaseModel):
     gross_exposure: Decimal
     net_exposure: Decimal
     unrealized_pnl: Decimal
+    position_count: int = 0
+    valued_position_count: int = 0
+    reporting_coverage: Decimal = Decimal("1")
 
 
 class Signal(BaseModel):

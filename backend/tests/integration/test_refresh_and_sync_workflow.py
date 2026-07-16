@@ -16,14 +16,27 @@ from pa_investing.db.repositories import (
     AccountRepository,
     AppSettingRepository,
     AuditEventRepository,
+    FxRateRepository,
+    MarketDataMappingRepository,
     PortfolioSnapshotRepository,
     PositionRepository,
     PriceRepository,
     SignalRepository,
 )
 from pa_investing.domain.enums import AssetClass, CostBasisStatus
-from pa_investing.domain.models import Account, Instrument, Position, PricePoint
-from pa_investing.market_data.interfaces import MarketDataProvider
+from pa_investing.domain.models import (
+    Account,
+    FxRatePoint,
+    Instrument,
+    MarketDataMapping,
+    Position,
+    PricePoint,
+)
+from pa_investing.market_data.interfaces import (
+    FxRateRequest,
+    MarketDataProvider,
+    QuoteRequest,
+)
 from pa_investing.notion.client import FakeNotionClient, NotionReadError
 from pa_investing.notion.schemas import (
     NotionDatabaseRow,
@@ -41,6 +54,39 @@ class FakeMarketDataProvider(MarketDataProvider):
 
     def get_latest_prices(self, symbols: set[str]) -> dict[str, PricePoint]:
         return {symbol: self.prices[symbol] for symbol in symbols}
+
+
+class FakeMappedMarketDataProvider(FakeMarketDataProvider):
+    provider_name = "twelve_data"
+
+    def __init__(
+        self,
+        quotes: dict[str, PricePoint],
+        rates: dict[tuple[str, str], FxRatePoint],
+    ) -> None:
+        super().__init__({})
+        self.quotes = quotes
+        self.rates = rates
+
+    def get_quotes(self, requests: list[QuoteRequest]) -> dict[str, PricePoint]:
+        requested_ids = {
+            request.instrument.instrument_id for request in requests
+        }
+        return {
+            instrument_id: point
+            for instrument_id, point in self.quotes.items()
+            if instrument_id in requested_ids
+        }
+
+    def get_fx_rates(
+        self,
+        requests: set[FxRateRequest],
+    ) -> dict[tuple[str, str], FxRatePoint]:
+        requested = {
+            (request.base_currency, request.quote_currency)
+            for request in requests
+        }
+        return {key: point for key, point in self.rates.items() if key in requested}
 
 
 class VisibilityCheckingNotionClient(FakeNotionClient):
@@ -408,3 +454,104 @@ def test_refresh_and_sync_applies_and_clears_notion_portfolio_inputs(
     assert "Settings" in notion_client.pages
     assert "Accounts" in notion_client.pages
     assert "Positions" in notion_client.pages
+
+
+def test_refresh_and_sync_uses_mapped_quotes_and_reporting_currency() -> None:
+    engine = create_engine("sqlite+pysqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    session_factory = sessionmaker(bind=engine)
+    notion_client = FakeNotionClient()
+    observed_at = datetime(2026, 7, 15, 12, tzinfo=UTC)
+
+    with session_factory() as session:
+        accounts = AccountRepository(session)
+        positions = PositionRepository(session)
+        accounts.upsert(
+            Account(
+                account_id="U1",
+                name="IBKR",
+                source="ibkr-flex",
+                base_currency="GBP",
+            )
+        )
+        stored = positions.upsert_broker_position(
+            Position(
+                account_id="U1",
+                instrument=Instrument(
+                    symbol="SGLN",
+                    name="Gold ETC",
+                    asset_class=AssetClass.ETF,
+                    currency="GBP",
+                    venue="LSEETF",
+                ),
+                quantity=Decimal("10"),
+                average_cost=Decimal("50"),
+                latest_price=Decimal("55"),
+                cost_basis_status=CostBasisStatus.BROKER,
+            )
+        )
+        instrument_id = stored.instrument.instrument_id
+        assert instrument_id is not None
+        mappings = MarketDataMappingRepository(session)
+        mappings.upsert(
+            MarketDataMapping(
+                instrument_id=instrument_id,
+                provider="twelve_data",
+                provider_symbol="SGLN",
+                provider_exchange="LSE",
+                expected_currency="GBX",
+                price_multiplier=Decimal("0.01"),
+            )
+        )
+        settings = AppSettingRepository(session)
+        settings.set(PORTFOLIO_BASE_CURRENCY_KEY, "USD")
+        session.commit()
+        quote = PricePoint(
+            instrument=stored.instrument,
+            price=Decimal("6000"),
+            observed_at=observed_at,
+            provider="twelve_data",
+            quote_currency="GBX",
+            provider_symbol="SGLN",
+            provider_exchange="LSE",
+        )
+        fx = FxRatePoint(
+            base_currency="GBP",
+            quote_currency="USD",
+            rate=Decimal("1.30"),
+            observed_at=observed_at,
+            provider="twelve_data",
+        )
+        notion_sync = NotionSync(notion_client)
+        workflow = RefreshAndSyncWorkflow(
+            position_repository=positions,
+            price_repository=PriceRepository(session),
+            market_data_provider=FakeMappedMarketDataProvider(
+                {instrument_id: quote},
+                {("GBP", "USD"): fx},
+            ),
+            daily_review_workflow=DailyReviewWorkflow(
+                notion_sync=notion_sync,
+                persistence=DailyReviewPersistence(
+                    audit_event_repository=AuditEventRepository(session),
+                    snapshot_repository=PortfolioSnapshotRepository(session),
+                    signal_repository=SignalRepository(session),
+                ),
+            ),
+            notion_sync=notion_sync,
+            commit=session.commit,
+            account_repository=accounts,
+            app_setting_repository=settings,
+            market_data_mapping_repository=mappings,
+            fx_rate_repository=FxRateRepository(session),
+        )
+
+        result = workflow.run(stop_prices={})
+        refreshed = positions.list_open_positions()[0]
+
+    assert refreshed.latest_price == Decimal("60")
+    assert refreshed.latest_price_provider == "twelve_data"
+    assert result.snapshot.base_currency == "USD"
+    assert result.snapshot.nav == Decimal("780.00")
+    assert result.snapshot.unrealized_pnl == Decimal("130.00")
+    assert result.snapshot.reporting_coverage == Decimal("1")

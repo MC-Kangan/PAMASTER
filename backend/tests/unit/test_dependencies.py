@@ -5,6 +5,8 @@ from unittest.mock import Mock
 import pytest
 
 from pa_investing.core import dependencies
+from pa_investing.core.config import Settings
+from pa_investing.market_data.twelve_data import TwelveDataProvider
 
 
 class StubSession:
@@ -61,3 +63,15 @@ def test_refresh_and_sync_workflow_dependency_does_not_commit_during_teardown(
         next(dependency)
 
     session.commit.assert_not_called()
+
+
+def test_market_data_dependency_builds_twelve_data_provider() -> None:
+    provider = dependencies.get_market_data_provider(
+        Settings(
+            market_data_provider="twelve_data",
+            twelve_data_api_key="test-key",
+        )
+    )
+
+    assert isinstance(provider, TwelveDataProvider)
+    assert provider.api_key == "test-key"

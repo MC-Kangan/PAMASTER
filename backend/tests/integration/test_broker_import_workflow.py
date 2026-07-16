@@ -1,3 +1,4 @@
+from datetime import UTC, datetime
 from decimal import Decimal
 
 from sqlalchemy import create_engine, select
@@ -5,9 +6,13 @@ from sqlalchemy.orm import sessionmaker
 
 from pa_investing.brokers.interfaces import BrokerConnector
 from pa_investing.db.base import Base
-from pa_investing.db.models import InstrumentRecord, PositionRecord
-from pa_investing.db.repositories import AccountRepository, PositionRepository
-from pa_investing.domain.enums import AssetClass, CostBasisStatus
+from pa_investing.db.models import InstrumentRecord, PositionRecord, PriceRecord
+from pa_investing.db.repositories import (
+    AccountRepository,
+    PositionRepository,
+    PriceRepository,
+)
+from pa_investing.domain.enums import AssetClass, CostBasisStatus, QuoteQuality
 from pa_investing.domain.models import Account, Instrument, Position
 from pa_investing.workflows.broker_import import BrokerImportWorkflow
 
@@ -123,7 +128,9 @@ def test_broker_import_workflow_overwrites_matching_account_positions() -> None:
             ),
             account_repository=account_repository,
             position_repository=position_repository,
+            price_repository=PriceRepository(session),
             commit=session.commit,
+            clock=lambda: datetime(2026, 7, 15, 7, tzinfo=UTC),
         )
 
         result = workflow.run()
@@ -137,6 +144,7 @@ def test_broker_import_workflow_overwrites_matching_account_positions() -> None:
             )
             .order_by(PositionRecord.account_id, InstrumentRecord.symbol)
         ).all()
+        stored_prices = session.scalars(select(PriceRecord)).all()
 
     assert result.accounts_imported == 1
     assert result.positions_imported == 2
@@ -161,8 +169,12 @@ def test_broker_import_workflow_overwrites_matching_account_positions() -> None:
     assert position_by_key[("U1234567", "SPGI")].broker_average_cost == Decimal("420")
     assert position_by_key[("U1234567", "SPGI")].cost_basis_status == "manual"
     assert position_by_key[("U1234567", "SGLN")].quantity == Decimal("50")
+    assert position_by_key[("U1234567", "SGLN")].latest_price_provider == "ibkr"
+    assert position_by_key[("U1234567", "SGLN")].latest_price_quality == "delayed"
     assert position_by_key[("U1234567", "ASML")].quantity == Decimal("0")
     assert position_by_key[("manual-pa", "AAPL")].quantity == Decimal("2")
+    assert len(stored_prices) == 2
+    assert {row.quality for row in stored_prices} == {QuoteQuality.DELAYED.value}
 
 
 def test_broker_import_workflow_fails_when_no_supported_accounts_or_positions_are_returned(

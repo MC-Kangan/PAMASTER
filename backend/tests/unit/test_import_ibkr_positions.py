@@ -61,7 +61,15 @@ def test_run_ibkr_import_uses_flex_connector_when_flex_credentials_are_configure
             self.base_url = base_url
 
     class StubBrokerImportWorkflow:
-        def __init__(self, *, connector, account_repository, position_repository, commit):
+        def __init__(
+            self,
+            *,
+            connector,
+            account_repository,
+            position_repository,
+            price_repository,
+            commit,
+        ):
             nonlocal captured_connector
             captured_connector = connector
 
@@ -83,6 +91,10 @@ def test_run_ibkr_import_uses_flex_connector_when_flex_credentials_are_configure
     )
     monkeypatch.setattr(
         "pa_investing.scripts.import_ibkr_positions.AccountRepository",
+        lambda session: object(),
+    )
+    monkeypatch.setattr(
+        "pa_investing.scripts.import_ibkr_positions.PriceRepository",
         lambda session: object(),
     )
     monkeypatch.setattr(

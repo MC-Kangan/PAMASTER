@@ -4,6 +4,7 @@ __pycache__/
 .pytest_cache/
 .ruff_cache/
 backend/.env
+backend/market_data_mappings.local.csv
 backend/*.db
 backend/*.db-*
 backend/*.sqlite*

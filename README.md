@@ -11,9 +11,9 @@ The working architecture today is:
 
 The system is intentionally analysis-only. It does not place trades or submit broker orders.
 
-The current mixed-currency demo proves the workflow, not portfolio accounting. FX conversion,
-exchange-specific symbols, cash flows, and transaction-aware returns must be added before NAV,
-drawdown, and sizing outputs are treated as investment-grade analytics.
+The current mixed-currency workflow now supports explicit provider mappings and USD/GBP FX
+conversion. Cash balances, cash flows, and transaction-aware returns are still required before
+NAV, drawdown, and sizing outputs are treated as investment-grade analytics.
 
 ## Current Status
 
@@ -23,6 +23,7 @@ The project has:
 - completed the first visible Phase 2 MVP loop for demo data
 - completed the Notion portfolio settings/accounts/positions backend slice
 - completed the general internal instrument identity backend slice
+- completed the mapped quote, FX, and reporting-currency backend slice
 
 In practical terms, the repo can now:
 
@@ -34,6 +35,9 @@ In practical terms, the repo can now:
 - support the same display symbol on different venues without merging positions or prices
 - exclude positions with unavailable cost basis from reliable P&L totals
 - refresh prices through a live market-data adapter
+- map each instrument to a provider symbol/listing and normalize minor currency units
+- persist timestamped quotes and FX rates with source and quality metadata
+- calculate USD/GBP reporting values with explicit incomplete-data coverage
 - compute and persist snapshots and signals
 - sync `Signals` and `Daily Review` to Notion
 - read portfolio base currency and manual cost overrides from Notion
@@ -82,6 +86,7 @@ Implemented:
   - `Signals`
   - `Daily Review`
 - Alpha Vantage market-data provider
+- Twelve Data mapped quote and FX provider
 - end-to-end refresh-and-sync workflow
 - `POST /workflows/refresh-and-sync`
 - demo portfolio seed flow
@@ -140,6 +145,22 @@ Implemented:
 - ambiguous symbol-only quote protection pending provider mapping in the FX/quote slice
 - internal-ID-based Notion position external IDs with legacy external-ID read compatibility
 
+### Phase 2: Quotes, FX, and Reporting Currency Slice
+
+Implemented:
+
+- provider-specific market-data mappings keyed by internal instrument ID
+- timestamped quote and FX history with provider and quality metadata
+- configurable Twelve Data adapter for mapped quotes and currency conversion
+- listing currency and exchange validation before a quote can replace a broker mark
+- persisted quote selection with IBKR EOD fallback
+- explicit price multipliers for provider units such as GBX to GBP
+- USD/GBP reporting values and coverage-aware aggregate calculations
+- stale and missing FX status in schema-flexible Notion payloads
+- CSV mapping importer and instrument-ID output in the position inspection command
+
+Live validation against representative instruments remains pending the user's Twelve Data key.
+
 ## Code Structure
 
 The main application code lives in [backend/src/pa_investing](backend/src/pa_investing/).
@@ -179,6 +200,8 @@ High-level layout:
   - market-data interface
   - manual provider
   - Alpha Vantage provider
+  - Twelve Data provider
+  - mapped quote selection
 - `notion/`
   - client interfaces
   - live Notion adapter

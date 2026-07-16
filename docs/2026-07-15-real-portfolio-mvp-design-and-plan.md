@@ -2,7 +2,7 @@
 
 **Status:** Approved for implementation on 2026-07-15
 
-**Progress:** Slice 1 implemented on 2026-07-15; Slice 2 is next.
+**Progress:** Slices 1-4 backend implementation completed on 2026-07-15.
 
 ## Objective
 
@@ -258,6 +258,16 @@ than applying an unsafe mark. Slice 4 will add explicit provider mappings for th
 
 Deliverable: the same T-1 position inventory can receive safer delayed marks and coherent USD or
 GBP reporting values.
+
+Implementation status (2026-07-15): backend implementation complete. Quotes and FX are persisted
+as timestamped observations with provider and quality metadata. Refresh uses explicit
+instrument-to-provider mappings, validates returned listing currency/exchange, normalizes provider
+units such as GBX through a configured multiplier, and retains broker EOD marks as fallback.
+Twelve Data is configurable behind the provider interface and fully covered with mocked HTTP
+tests. Reporting-currency totals exclude positions with missing FX and expose coverage; stale FX
+remains visible as stale in Notion. A CSV importer provides an auditable way to maintain mappings.
+Live Twelve Data validation for the user's representative listings remains a manual check once an
+API key is configured.
 
 ### Slice 5: Unified Operational Workflow
 

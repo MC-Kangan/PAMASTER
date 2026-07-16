@@ -2,14 +2,22 @@ import logging
 from collections.abc import Callable
 from decimal import Decimal
 
+from pa_investing.analytics.valuation import apply_reporting_currency
 from pa_investing.db.repositories import (
     AccountRepository,
     AppSettingRepository,
+    FxRateRepository,
+    MarketDataMappingRepository,
     PositionRepository,
     PriceRepository,
 )
 from pa_investing.domain.models import Position
-from pa_investing.market_data.interfaces import MarketDataProvider
+from pa_investing.market_data.interfaces import (
+    FxRateRequest,
+    MarketDataProvider,
+    QuoteRequest,
+)
+from pa_investing.market_data.selection import select_position_quote
 from pa_investing.notion.client import NotionReadError
 from pa_investing.notion.sync import (
     PORTFOLIO_BASE_CURRENCY_KEY,
@@ -32,6 +40,9 @@ class RefreshAndSyncWorkflow:
         commit: Callable[[], None],
         account_repository: AccountRepository | None = None,
         app_setting_repository: AppSettingRepository | None = None,
+        market_data_mapping_repository: MarketDataMappingRepository | None = None,
+        fx_rate_repository: FxRateRepository | None = None,
+        default_base_currency: str = "USD",
     ) -> None:
         self.position_repository = position_repository
         self.price_repository = price_repository
@@ -41,11 +52,43 @@ class RefreshAndSyncWorkflow:
         self.commit = commit
         self.account_repository = account_repository
         self.app_setting_repository = app_setting_repository
+        self.market_data_mapping_repository = market_data_mapping_repository
+        self.fx_rate_repository = fx_rate_repository
+        self.default_base_currency = default_base_currency.upper()
 
     def run(self, stop_prices: dict[str, Decimal]) -> DailyReviewResult:
         positions = self.position_repository.list_open_positions()
         self._apply_notion_inputs(positions)
         positions = self.position_repository.list_open_positions()
+        base_currency = self._base_currency()
+        if (
+            self.market_data_mapping_repository is not None
+            and self.fx_rate_repository is not None
+        ):
+            self._refresh_mapped_quotes(positions, base_currency)
+        else:
+            self._refresh_legacy_quotes(positions)
+
+        result = self.daily_review_workflow.run(
+            positions=positions,
+            stop_prices=stop_prices,
+            sync_signals=False,
+            base_currency=base_currency,
+        )
+        self.commit()
+        if self.account_repository is not None:
+            self.notion_sync.sync_portfolio(
+                accounts=self.account_repository.list_all(),
+                positions=positions,
+            )
+        self.daily_review_workflow.sync_signals(result)
+        self.notion_sync.sync_daily_review(
+            result,
+            external_id=self._daily_review_external_id(result),
+        )
+        return result
+
+    def _refresh_legacy_quotes(self, positions: list[Position]) -> None:
         positions_by_symbol: dict[str, list[Position]] = {}
         for position in positions:
             positions_by_symbol.setdefault(position.instrument.symbol, []).append(position)
@@ -74,23 +117,75 @@ class RefreshAndSyncWorkflow:
                 position.latest_price = price_point.price
                 self.position_repository.upsert(position)
 
-        result = self.daily_review_workflow.run(
-            positions=positions,
-            stop_prices=stop_prices,
-            sync_signals=False,
+    def _refresh_mapped_quotes(
+        self,
+        positions: list[Position],
+        base_currency: str,
+    ) -> None:
+        if self.market_data_mapping_repository is None or self.fx_rate_repository is None:
+            return
+        positions_by_id = {
+            position.instrument.instrument_id: position
+            for position in positions
+            if position.instrument.instrument_id is not None
+        }
+        mappings = self.market_data_mapping_repository.list_for_instruments(
+            set(positions_by_id),
+            self.market_data_provider.provider_name,
         )
-        self.commit()
-        if self.account_repository is not None:
-            self.notion_sync.sync_portfolio(
-                accounts=self.account_repository.list_all(),
-                positions=positions,
+        quote_requests = [
+            QuoteRequest(instrument=positions_by_id[instrument_id].instrument, mapping=mapping)
+            for instrument_id, mapping in mappings.items()
+        ]
+        candidates = self.market_data_provider.get_quotes(quote_requests)
+        for instrument_id, position in positions_by_id.items():
+            selected = select_position_quote(
+                position,
+                mappings.get(instrument_id),
+                candidates.get(instrument_id),
+                self.price_repository.latest_for_instrument(instrument_id),
             )
-        self.daily_review_workflow.sync_signals(result)
-        self.notion_sync.sync_daily_review(
-            result,
-            external_id=self._daily_review_external_id(result),
+            if selected is None:
+                continue
+            self.price_repository.upsert(selected)
+            position.latest_price = selected.price
+            position.latest_price_observed_at = selected.observed_at
+            position.latest_price_provider = selected.provider
+            position.latest_price_quality = selected.quality
+            self.position_repository.upsert(position)
+
+        fx_requests = {
+            FxRateRequest(position.instrument.currency, base_currency)
+            for position in positions
+            if position.instrument.currency != base_currency
+        }
+        fetched_rates = self.market_data_provider.get_fx_rates(fx_requests)
+        for point in fetched_rates.values():
+            self.fx_rate_repository.upsert(point)
+        resolved_rates = dict(fetched_rates)
+        for request in fx_requests:
+            key = (request.base_currency.upper(), request.quote_currency.upper())
+            if key in resolved_rates:
+                continue
+            persisted = self.fx_rate_repository.latest(*key)
+            if persisted is not None:
+                resolved_rates[key] = persisted
+        apply_reporting_currency(
+            positions,
+            base_currency,
+            resolved_rates,
         )
-        return result
+
+    def _base_currency(self) -> str:
+        if self.app_setting_repository is None:
+            return self.default_base_currency
+        return (
+            self.app_setting_repository.get(
+                PORTFOLIO_BASE_CURRENCY_KEY,
+                self.default_base_currency,
+            )
+            or self.default_base_currency
+        ).upper()
 
     def _apply_notion_inputs(self, positions: list[Position]) -> None:
         if (

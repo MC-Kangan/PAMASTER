@@ -39,9 +39,28 @@ class MaxNavWeightSizingModel:
                 message=f"No reduction for {position.instrument.symbol}; missing price or NAV.",
             )
 
+        position_value = (
+            position.reporting_market_value
+            if position.reporting_currency is not None
+            else position.market_value
+        )
+        reporting_unit_price = (
+            position.latest_price * position.fx_rate
+            if position.reporting_currency is not None and position.fx_rate is not None
+            else position.latest_price
+        )
+        if position_value is None or reporting_unit_price <= 0:
+            return SizingRecommendation(
+                symbol=position.instrument.symbol,
+                quantity_to_reduce=Decimal("0"),
+                message=(
+                    f"No reduction for {position.instrument.symbol}; "
+                    "reporting-currency value is unavailable."
+                ),
+            )
         max_value = portfolio_nav * self.max_weight
-        excess_value = max(position.market_value - max_value, Decimal("0"))
-        quantity = (excess_value / position.latest_price).quantize(
+        excess_value = max(position_value - max_value, Decimal("0"))
+        quantity = (excess_value / reporting_unit_price).quantize(
             Decimal("1"),
             rounding=ROUND_DOWN,
         )

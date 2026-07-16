@@ -52,8 +52,13 @@ class DailyReviewWorkflow:
         stop_prices: dict[str, Decimal],
         *,
         sync_signals: bool = True,
+        base_currency: str = "USD",
     ) -> DailyReviewResult:
-        result = self.agent_api.run_daily_review(positions=positions, stop_prices=stop_prices)
+        result = self.agent_api.run_daily_review(
+            positions=positions,
+            stop_prices=stop_prices,
+            base_currency=base_currency,
+        )
         if self.persistence is not None:
             self.persistence.persist(result)
         if sync_signals:

@@ -33,3 +33,11 @@ class CostBasisStatus(StrEnum):
     BROKER = "broker"
     TRADE_RECONSTRUCTED = "trade_reconstructed"
     UNAVAILABLE = "unavailable"
+
+
+class QuoteQuality(StrEnum):
+    LIVE = "live"
+    DELAYED = "delayed"
+    EOD = "eod"
+    EOD_FALLBACK = "eod_fallback"
+    MANUAL = "manual"

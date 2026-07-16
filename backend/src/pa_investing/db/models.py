@@ -104,6 +104,33 @@ class InstrumentIdentifierRecord(Base):
     value: Mapped[str] = mapped_column(String(255), nullable=False)
 
 
+class MarketDataMappingRecord(Base):
+    __tablename__ = "market_data_mappings"
+    __table_args__ = (
+        UniqueConstraint(
+            "instrument_id",
+            "provider",
+            name="uq_instrument_market_data_provider",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    instrument_id: Mapped[str] = mapped_column(
+        ForeignKey("instruments.instrument_id"),
+        nullable=False,
+    )
+    provider: Mapped[str] = mapped_column(String(64), nullable=False)
+    provider_symbol: Mapped[str] = mapped_column(String(128), nullable=False)
+    provider_exchange: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    expected_currency: Mapped[str] = mapped_column(String(8), nullable=False)
+    price_multiplier: Mapped[Decimal] = mapped_column(
+        Numeric(24, 12),
+        nullable=False,
+        default=1,
+    )
+    enabled: Mapped[bool] = mapped_column(nullable=False, default=True)
+
+
 class PositionRecord(Base):
     __tablename__ = "positions"
     __table_args__ = (
@@ -133,6 +160,12 @@ class PositionRecord(Base):
         nullable=True,
     )
     latest_price: Mapped[Decimal | None] = mapped_column(Numeric(24, 8), nullable=True)
+    latest_price_observed_at: Mapped[datetime | None] = mapped_column(
+        UTCDateTime(),
+        nullable=True,
+    )
+    latest_price_provider: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    latest_price_quality: Mapped[str | None] = mapped_column(String(32), nullable=True)
     cost_basis_status: Mapped[str] = mapped_column(
         String(32),
         nullable=False,
@@ -164,6 +197,35 @@ class PriceRecord(Base):
         nullable=False,
     )
     price: Mapped[Decimal] = mapped_column(Numeric(24, 8), nullable=False)
+    observed_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)
+    provider: Mapped[str] = mapped_column(String(64), nullable=False)
+    quote_currency: Mapped[str | None] = mapped_column(String(8), nullable=True)
+    provider_symbol: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    provider_exchange: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    quality: Mapped[str] = mapped_column(
+        String(32),
+        nullable=False,
+        default="delayed",
+        server_default=text("'delayed'"),
+    )
+
+
+class FxRateRecord(Base):
+    __tablename__ = "fx_rates"
+    __table_args__ = (
+        UniqueConstraint(
+            "base_currency",
+            "quote_currency",
+            "observed_at",
+            "provider",
+            name="uq_fx_pair_time_provider",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    base_currency: Mapped[str] = mapped_column(String(8), nullable=False)
+    quote_currency: Mapped[str] = mapped_column(String(8), nullable=False)
+    rate: Mapped[Decimal] = mapped_column(Numeric(24, 12), nullable=False)
     observed_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)
     provider: Mapped[str] = mapped_column(String(64), nullable=False)
 
@@ -202,3 +264,10 @@ class PortfolioSnapshotRecord(Base):
     gross_exposure: Mapped[Decimal] = mapped_column(Numeric(24, 8), nullable=False)
     net_exposure: Mapped[Decimal] = mapped_column(Numeric(24, 8), nullable=False)
     unrealized_pnl: Mapped[Decimal] = mapped_column(Numeric(24, 8), nullable=False)
+    position_count: Mapped[int] = mapped_column(nullable=False, default=0)
+    valued_position_count: Mapped[int] = mapped_column(nullable=False, default=0)
+    reporting_coverage: Mapped[Decimal] = mapped_column(
+        Numeric(12, 8),
+        nullable=False,
+        default=1,
+    )

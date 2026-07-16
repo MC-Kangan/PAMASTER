@@ -3,7 +3,7 @@ from decimal import Decimal, InvalidOperation
 
 import httpx
 
-from pa_investing.domain.enums import AssetClass
+from pa_investing.domain.enums import AssetClass, QuoteQuality
 from pa_investing.domain.models import Instrument, PricePoint
 from pa_investing.market_data.interfaces import MarketDataProvider
 
@@ -12,6 +12,8 @@ PROVIDER_NAME = "alpha_vantage"
 
 
 class AlphaVantageProvider(MarketDataProvider):
+    provider_name = PROVIDER_NAME
+
     def __init__(
         self,
         api_key: str,
@@ -84,6 +86,7 @@ class AlphaVantageProvider(MarketDataProvider):
                 price=parsed_price,
                 observed_at=observed_at,
                 provider=PROVIDER_NAME,
+                quality=QuoteQuality.EOD,
             )
         except (InvalidOperation, ValueError):
             return None
@@ -131,6 +134,7 @@ class AlphaVantageProvider(MarketDataProvider):
                 price=parsed_price,
                 observed_at=observed_at,
                 provider=PROVIDER_NAME,
+                quality=QuoteQuality.DELAYED,
             )
         except (InvalidOperation, ValueError):
             return None

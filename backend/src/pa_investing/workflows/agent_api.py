@@ -26,12 +26,13 @@ class AgentAPI:
         self,
         positions: list[Position],
         stop_prices: dict[str, Decimal],
+        base_currency: str = "USD",
     ) -> DailyReviewResult:
         snapshot = build_portfolio_snapshot(
             snapshot_id=f"snap-{uuid4().hex}",
             positions=positions,
             observed_at=datetime.now(tz=UTC),
-            base_currency="USD",
+            base_currency=base_currency,
         )
         signals = self.signal_service.evaluate_stop_rules(
             positions=positions,

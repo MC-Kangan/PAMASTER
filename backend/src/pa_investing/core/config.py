@@ -15,6 +15,7 @@ class Settings(BaseSettings):
     notion_daily_review_database_id: str = ""
     market_data_provider: str = "manual"
     alpha_vantage_api_key: str = ""
+    twelve_data_api_key: str = ""
     ibkr_gateway_base_url: str = "https://127.0.0.1:5000/v1/api"
     ibkr_flex_base_url: str = (
         "https://ndcdyn.interactivebrokers.com/AccountManagement/FlexWebService"

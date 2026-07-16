@@ -11,8 +11,10 @@ from pa_investing.db.models import (
     AccountRecord,
     AppSettingRecord,
     AuditEventRecord,
+    FxRateRecord,
     InstrumentIdentifierRecord,
     InstrumentRecord,
+    MarketDataMappingRecord,
     PortfolioSnapshotRecord,
     PositionRecord,
     PriceRecord,
@@ -21,14 +23,17 @@ from pa_investing.db.models import (
 from pa_investing.domain.enums import (
     AssetClass,
     CostBasisStatus,
+    QuoteQuality,
     SignalSeverity,
     SignalStatus,
     SignalType,
 )
 from pa_investing.domain.models import (
     Account,
+    FxRatePoint,
     Instrument,
     InstrumentIdentifier,
+    MarketDataMapping,
     PortfolioSnapshot,
     Position,
     PricePoint,
@@ -245,6 +250,13 @@ class PositionRepository:
             self.session.add(record)
         record.quantity = position.quantity
         record.latest_price = position.latest_price
+        record.latest_price_observed_at = position.latest_price_observed_at
+        record.latest_price_provider = position.latest_price_provider
+        record.latest_price_quality = (
+            position.latest_price_quality.value
+            if position.latest_price_quality is not None
+            else None
+        )
         record.broker_average_cost = (
             position.broker_average_cost
             if position.broker_average_cost is not None
@@ -272,6 +284,13 @@ class PositionRepository:
             self.session.add(record)
         record.quantity = position.quantity
         record.latest_price = position.latest_price
+        record.latest_price_observed_at = position.latest_price_observed_at
+        record.latest_price_provider = position.latest_price_provider
+        record.latest_price_quality = (
+            position.latest_price_quality.value
+            if position.latest_price_quality is not None
+            else None
+        )
         record.broker_average_cost = position.average_cost
         record.broker_cost_basis_status = position.cost_basis_status.value
         self._apply_effective_cost(record)
@@ -412,7 +431,67 @@ class PositionRepository:
             broker_average_cost=record.broker_average_cost,
             broker_cost_basis_status=CostBasisStatus(record.broker_cost_basis_status),
             manual_average_cost=record.manual_average_cost,
+            latest_price_observed_at=record.latest_price_observed_at,
+            latest_price_provider=record.latest_price_provider,
+            latest_price_quality=(
+                QuoteQuality(record.latest_price_quality)
+                if record.latest_price_quality
+                else None
+            ),
         )
+
+
+class MarketDataMappingRepository:
+    def __init__(self, session: Session) -> None:
+        self.session = session
+
+    def upsert(self, mapping: MarketDataMapping) -> None:
+        if self.session.get(InstrumentRecord, mapping.instrument_id) is None:
+            raise KeyError(f"instrument not found: {mapping.instrument_id}")
+        record = self.session.scalar(
+            select(MarketDataMappingRecord).where(
+                MarketDataMappingRecord.instrument_id == mapping.instrument_id,
+                MarketDataMappingRecord.provider == mapping.provider,
+            )
+        )
+        if record is None:
+            record = MarketDataMappingRecord(
+                instrument_id=mapping.instrument_id,
+                provider=mapping.provider,
+            )
+            self.session.add(record)
+        record.provider_symbol = mapping.provider_symbol
+        record.provider_exchange = mapping.provider_exchange
+        record.expected_currency = mapping.expected_currency
+        record.price_multiplier = mapping.price_multiplier
+        record.enabled = mapping.enabled
+
+    def list_for_instruments(
+        self,
+        instrument_ids: set[str],
+        provider: str,
+    ) -> dict[str, MarketDataMapping]:
+        if not instrument_ids:
+            return {}
+        rows = self.session.scalars(
+            select(MarketDataMappingRecord).where(
+                MarketDataMappingRecord.instrument_id.in_(sorted(instrument_ids)),
+                MarketDataMappingRecord.provider == provider.lower(),
+                MarketDataMappingRecord.enabled.is_(True),
+            )
+        ).all()
+        return {
+            row.instrument_id: MarketDataMapping(
+                instrument_id=row.instrument_id,
+                provider=row.provider,
+                provider_symbol=row.provider_symbol,
+                provider_exchange=row.provider_exchange,
+                expected_currency=row.expected_currency,
+                price_multiplier=row.price_multiplier,
+                enabled=row.enabled,
+            )
+            for row in rows
+        }
 
 
 class PriceRepository:
@@ -439,6 +518,10 @@ class PriceRepository:
             )
             self.session.add(record)
         record.price = price_point.price
+        record.quote_currency = price_point.quote_currency
+        record.provider_symbol = price_point.provider_symbol
+        record.provider_exchange = price_point.provider_exchange
+        record.quality = price_point.quality.value
 
     def latest_prices(self) -> Mapping[str, PricePoint]:
         by_instrument_id = self.latest_prices_by_instrument_id()
@@ -476,9 +559,64 @@ class PriceRepository:
                 price=price_record.price,
                 observed_at=_normalize_utc_timestamp(price_record.observed_at),
                 provider=price_record.provider,
+                quote_currency=price_record.quote_currency,
+                provider_symbol=price_record.provider_symbol,
+                provider_exchange=price_record.provider_exchange,
+                quality=QuoteQuality(price_record.quality),
             )
             for instrument_id, (price_record, instrument_record) in latest.items()
         }
+
+    def latest_for_instrument(self, instrument_id: str) -> PricePoint | None:
+        return self.latest_prices_by_instrument_id().get(instrument_id)
+
+
+class FxRateRepository:
+    def __init__(self, session: Session) -> None:
+        self.session = session
+
+    def upsert(self, point: FxRatePoint) -> None:
+        observed_at = _normalize_utc_timestamp(point.observed_at)
+        record = self.session.scalar(
+            select(FxRateRecord).where(
+                FxRateRecord.base_currency == point.base_currency,
+                FxRateRecord.quote_currency == point.quote_currency,
+                FxRateRecord.observed_at == observed_at,
+                FxRateRecord.provider == point.provider,
+            )
+        )
+        if record is None:
+            record = FxRateRecord(
+                base_currency=point.base_currency,
+                quote_currency=point.quote_currency,
+                observed_at=observed_at,
+                provider=point.provider,
+            )
+            self.session.add(record)
+        record.rate = point.rate
+
+    def latest(
+        self,
+        base_currency: str,
+        quote_currency: str,
+    ) -> FxRatePoint | None:
+        row = self.session.scalar(
+            select(FxRateRecord)
+            .where(
+                FxRateRecord.base_currency == base_currency.upper(),
+                FxRateRecord.quote_currency == quote_currency.upper(),
+            )
+            .order_by(FxRateRecord.observed_at.desc())
+        )
+        if row is None:
+            return None
+        return FxRatePoint(
+            base_currency=row.base_currency,
+            quote_currency=row.quote_currency,
+            rate=row.rate,
+            observed_at=_normalize_utc_timestamp(row.observed_at),
+            provider=row.provider,
+        )
 
 
 class AuditEventRepository:
@@ -510,6 +648,9 @@ class PortfolioSnapshotRepository:
         record.gross_exposure = snapshot.gross_exposure
         record.net_exposure = snapshot.net_exposure
         record.unrealized_pnl = snapshot.unrealized_pnl
+        record.position_count = snapshot.position_count
+        record.valued_position_count = snapshot.valued_position_count
+        record.reporting_coverage = snapshot.reporting_coverage
 
     def list_history(
         self,
@@ -530,6 +671,9 @@ class PortfolioSnapshotRepository:
                 gross_exposure=row.gross_exposure,
                 net_exposure=row.net_exposure,
                 unrealized_pnl=row.unrealized_pnl,
+                position_count=row.position_count,
+                valued_position_count=row.valued_position_count,
+                reporting_coverage=row.reporting_coverage,
             )
             for row in rows
         ]

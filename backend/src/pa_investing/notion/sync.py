@@ -2,10 +2,7 @@ import logging
 from dataclasses import dataclass, field
 from decimal import Decimal
 
-from pa_investing.analytics.metrics import (
-    calculate_exposure_by_asset_class,
-    calculate_exposure_by_currency,
-)
+from pa_investing.analytics.metrics import calculate_exposure_by_currency
 from pa_investing.domain.enums import AssetClass, CostBasisStatus
 from pa_investing.domain.models import Account, Position, Signal
 from pa_investing.notion.client import NotionClient
@@ -115,15 +112,42 @@ class NotionSync:
             f"- {currency}: {self._format_decimal(value)}"
             for currency, value in sorted(exposure.items())
         ] or ["- No open positions."]
+        reporting_values = [
+            position.reporting_market_value
+            for position in account_positions
+            if position.reporting_market_value is not None
+        ]
+        reporting_currency = next(
+            (
+                position.reporting_currency
+                for position in account_positions
+                if position.reporting_currency is not None
+            ),
+            None,
+        )
+        reporting_coverage = (
+            Decimal("1")
+            if not account_positions
+            else Decimal(len(reporting_values)) / Decimal(len(account_positions))
+        )
+        account_properties = {
+            "Account ID": NotionPropertyValue.rich_text(account.account_id),
+            "Source": NotionPropertyValue.select(account.source),
+            "Base Currency": NotionPropertyValue.select(account.base_currency),
+            "Position Count": NotionPropertyValue.number(len(account_positions)),
+            "Currencies": NotionPropertyValue.rich_text(", ".join(currencies)),
+            "Reporting Coverage": NotionPropertyValue.number(reporting_coverage),
+        }
+        if reporting_values and reporting_currency:
+            account_properties["Reporting Currency"] = NotionPropertyValue.select(
+                reporting_currency
+            )
+            account_properties["Reporting Market Value"] = NotionPropertyValue.number(
+                sum(reporting_values, Decimal("0"))
+            )
         return NotionPagePayload(
             title=account.name,
-            properties={
-                "Account ID": NotionPropertyValue.rich_text(account.account_id),
-                "Source": NotionPropertyValue.select(account.source),
-                "Base Currency": NotionPropertyValue.select(account.base_currency),
-                "Position Count": NotionPropertyValue.number(len(account_positions)),
-                "Currencies": NotionPropertyValue.rich_text(", ".join(currencies)),
-            },
+            properties=account_properties,
             body="\n".join(
                 [
                     "Account Overview",
@@ -133,7 +157,11 @@ class NotionSync:
                     "Market Value by Currency",
                     *breakdown,
                     "",
-                    "Values are not combined until portfolio FX conversion is enabled.",
+                    (
+                        "Reporting values use the configured portfolio currency."
+                        if reporting_values
+                        else "Values are not combined because required FX is unavailable."
+                    ),
                 ]
             ),
         )
@@ -164,6 +192,40 @@ class NotionSync:
             )
         if position.latest_price is not None:
             properties["Price"] = NotionPropertyValue.number(position.latest_price)
+        if position.latest_price_observed_at is not None:
+            properties["Price As Of"] = NotionPropertyValue.rich_text(
+                position.latest_price_observed_at.isoformat()
+            )
+        if position.latest_price_provider is not None:
+            properties["Price Source"] = NotionPropertyValue.select(
+                position.latest_price_provider
+            )
+        if position.latest_price_quality is not None:
+            properties["Price Quality"] = NotionPropertyValue.select(
+                position.latest_price_quality.value
+            )
+        if position.reporting_currency is not None:
+            properties["Reporting Currency"] = NotionPropertyValue.select(
+                position.reporting_currency
+            )
+        if position.fx_rate is not None:
+            properties["FX Rate"] = NotionPropertyValue.number(position.fx_rate)
+        if position.fx_observed_at is not None:
+            properties["FX As Of"] = NotionPropertyValue.rich_text(
+                position.fx_observed_at.isoformat()
+            )
+        if position.reporting_currency is not None:
+            properties["FX Status"] = NotionPropertyValue.select(
+                self._fx_status(position)
+            )
+        if position.reporting_market_value is not None:
+            properties["Reporting Market Value"] = NotionPropertyValue.number(
+                position.reporting_market_value
+            )
+        if position.reporting_unrealized_pnl is not None:
+            properties["Reporting Unrealized PnL"] = NotionPropertyValue.number(
+                position.reporting_unrealized_pnl
+            )
         if position.cost_basis_status != CostBasisStatus.UNAVAILABLE:
             properties["Unrealized PnL"] = NotionPropertyValue.number(
                 position.unrealized_pnl
@@ -305,6 +367,11 @@ class NotionSync:
             f"- Gross Exposure: {cls._format_decimal(snapshot.gross_exposure)}",
             f"- Net Exposure: {cls._format_decimal(snapshot.net_exposure)}",
             f"- Unrealized PnL: {cls._format_decimal(snapshot.unrealized_pnl)}",
+            f"- Reporting Currency: {snapshot.base_currency}",
+            f"- Reporting Coverage: {cls._format_percent(snapshot.reporting_coverage)}",
+            "",
+            "Data Quality",
+            *cls._data_quality_lines(result.positions),
             "",
             "Allocation",
             *cls._allocation_lines(result.positions, snapshot.nav),
@@ -321,6 +388,25 @@ class NotionSync:
         return "\n".join(lines)
 
     @classmethod
+    def _data_quality_lines(cls, positions: list[Position]) -> list[str]:
+        missing_fx = [
+            position.instrument.symbol
+            for position in positions
+            if position.reporting_currency is not None and position.fx_rate is None
+        ]
+        stale_fx = [
+            position.instrument.symbol
+            for position in positions
+            if position.reporting_currency is not None and position.fx_stale
+        ]
+        lines: list[str] = []
+        if missing_fx:
+            lines.append("- Missing FX: " + ", ".join(sorted(missing_fx)))
+        if stale_fx:
+            lines.append("- Stale FX*: " + ", ".join(sorted(stale_fx)))
+        return lines or ["- Quote and FX coverage complete."]
+
+    @classmethod
     def _allocation_lines(
         cls,
         positions: list[Position],
@@ -328,7 +414,22 @@ class NotionSync:
     ) -> list[str]:
         if portfolio_nav == 0:
             return ["- No allocation available."]
-        exposure_by_asset_class = calculate_exposure_by_asset_class(positions)
+        reporting_mode = any(
+            position.reporting_currency is not None for position in positions
+        )
+        exposure_by_asset_class: dict[AssetClass, Decimal] = {}
+        for position in positions:
+            value = (
+                position.reporting_market_value
+                if reporting_mode
+                else position.market_value
+            )
+            if value is None:
+                continue
+            asset_class = position.instrument.asset_class
+            exposure_by_asset_class[asset_class] = (
+                exposure_by_asset_class.get(asset_class, Decimal("0")) + abs(value)
+            )
         ordered_asset_classes = sorted(
             exposure_by_asset_class.items(),
             key=lambda item: item[1],
@@ -350,9 +451,25 @@ class NotionSync:
     ) -> list[str]:
         if portfolio_nav == 0 or not positions:
             return ["- No holdings available."]
+        reporting_mode = any(
+            position.reporting_currency is not None for position in positions
+        )
+        valued_positions = [
+            (
+                position,
+                position.reporting_market_value
+                if reporting_mode
+                else position.market_value,
+            )
+            for position in positions
+        ]
         ranked_positions = sorted(
-            positions,
-            key=lambda position: abs(position.market_value),
+            (
+                (position, value)
+                for position, value in valued_positions
+                if value is not None
+            ),
+            key=lambda item: abs(item[1]),
             reverse=True,
         )[:limit]
         return [
@@ -360,10 +477,10 @@ class NotionSync:
                 f"- {position.instrument.symbol} "
                 f"({cls._asset_class_label(position.instrument.asset_class)}, "
                 f"{position.instrument.currency}) - "
-                f"{cls._format_percent(abs(position.market_value) / portfolio_nav)} "
+                f"{cls._format_percent(abs(value) / portfolio_nav)} "
                 "of portfolio"
             )
-            for position in ranked_positions
+            for position, value in ranked_positions
         ]
 
     @classmethod
@@ -378,6 +495,14 @@ class NotionSync:
     @staticmethod
     def _humanize_token(value: str) -> str:
         return value.replace("_", " ").title()
+
+    @staticmethod
+    def _fx_status(position: Position) -> str:
+        if position.fx_rate is None:
+            return "missing"
+        if position.fx_stale:
+            return "stale"
+        return "current"
 
     @staticmethod
     def _asset_class_label(asset_class: AssetClass) -> str:

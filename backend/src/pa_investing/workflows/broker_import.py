@@ -1,10 +1,15 @@
 from collections.abc import Callable
 from dataclasses import dataclass
+from datetime import UTC, datetime
 
 from pa_investing.brokers.interfaces import BrokerConnector
-from pa_investing.db.repositories import AccountRepository, PositionRepository
-from pa_investing.domain.enums import CostBasisStatus
-from pa_investing.domain.models import Account
+from pa_investing.db.repositories import (
+    AccountRepository,
+    PositionRepository,
+    PriceRepository,
+)
+from pa_investing.domain.enums import CostBasisStatus, QuoteQuality
+from pa_investing.domain.models import Account, PricePoint
 
 
 @dataclass(frozen=True)
@@ -25,11 +30,15 @@ class BrokerImportWorkflow:
         account_repository: AccountRepository,
         position_repository: PositionRepository,
         commit: Callable[[], None],
+        price_repository: PriceRepository | None = None,
+        clock: Callable[[], datetime] | None = None,
     ) -> None:
         self.connector = connector
         self.account_repository = account_repository
         self.position_repository = position_repository
         self.commit = commit
+        self.price_repository = price_repository
+        self.clock = clock or (lambda: datetime.now(tz=UTC))
 
     def run(self) -> BrokerImportResult:
         accounts = self.connector.list_accounts()
@@ -49,6 +58,18 @@ class BrokerImportWorkflow:
 
         for account in accounts_by_id.values():
             self.account_repository.upsert(account)
+        imported_at = self.clock()
+        for position in positions:
+            if position.latest_price is None:
+                continue
+            account = accounts_by_id[position.account_id]
+            position.latest_price_observed_at = imported_at
+            if account.source == "ibkr-flex":
+                position.latest_price_provider = "ibkr_flex_eod"
+                position.latest_price_quality = QuoteQuality.EOD_FALLBACK
+            else:
+                position.latest_price_provider = account.source
+                position.latest_price_quality = QuoteQuality.DELAYED
         effective_positions = [
             self.position_repository.upsert_broker_position(position)
             for position in positions
@@ -62,6 +83,22 @@ class BrokerImportWorkflow:
                 position.account_id,
                 set(),
             ).add(instrument_id)
+            if self.price_repository is not None and position.latest_price is not None:
+                self.price_repository.upsert(
+                    PricePoint(
+                        instrument=position.instrument,
+                        price=position.latest_price,
+                        observed_at=position.latest_price_observed_at or imported_at,
+                        provider=position.latest_price_provider or "broker_eod",
+                        quote_currency=position.instrument.currency,
+                        provider_symbol=position.instrument.symbol,
+                        provider_exchange=position.instrument.venue,
+                        quality=(
+                            position.latest_price_quality
+                            or QuoteQuality.EOD_FALLBACK
+                        ),
+                    )
+                )
 
         positions_closed = self.position_repository.close_positions_missing_from_snapshot(
             set(accounts_by_id),

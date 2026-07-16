@@ -11,12 +11,11 @@ The system is analysis-only. It does not place trades.
 
 ## Current Data Limitation
 
-The present MVP calculations assume position prices are already expressed in one common
-portfolio currency. The demo portfolio intentionally contains USD, EUR, and GBP instruments,
-but FX conversion and exchange-specific provider symbols are not implemented yet. Treat its
-NAV, return, drawdown, and sizing outputs as workflow demonstrations until the instrument and
-FX layer is complete. The first live Notion verification should therefore use seeded/manual
-prices rather than treating mixed-currency Alpha Vantage output as portfolio truth.
+The backend now converts mapped USD, EUR, and GBP positions into the configured USD or GBP
+reporting currency. Missing FX excludes a position from aggregate reporting totals and lowers
+the visible coverage ratio; stale persisted FX remains usable but is marked stale. Cash balances,
+cash flows, and transaction-aware return calculations are not implemented, so the current
+portfolio total is invested value rather than complete broker NAV.
 
 ## Implemented So Far
 
@@ -29,6 +28,8 @@ The backend currently includes:
 - persistent broker/manual cost-basis separation with explicit reliability status
 - optional IBKR Client Portal Gateway connector for local/manual testing
 - live market data through Alpha Vantage
+- mapped quotes and FX through Twelve Data
+- persisted quote/FX observations, EOD fallback, and reporting coverage
 - live Notion sync for `Signals` and `Daily Review`
 - refresh-and-sync workflow
 - performance-history analytics from persisted snapshots
@@ -78,8 +79,9 @@ PA_NOTION_ACCOUNTS_DATABASE_ID=accounts_database_id
 PA_NOTION_POSITIONS_DATABASE_ID=positions_database_id
 PA_NOTION_SIGNALS_DATABASE_ID=xxxxxxxxxxxxxxxx
 PA_NOTION_DAILY_REVIEW_DATABASE_ID=yyyyyyyyyyyyyyyy
-PA_MARKET_DATA_PROVIDER=alpha_vantage
-PA_ALPHA_VANTAGE_API_KEY=your_alpha_vantage_key
+PA_MARKET_DATA_PROVIDER=twelve_data
+PA_TWELVE_DATA_API_KEY=your_twelve_data_key
+PA_DEFAULT_BASE_CURRENCY=USD
 PA_ANALYTICS_AUTH_ENABLED=true
 PA_ANALYTICS_AUTH_USERNAME=your_username
 PA_ANALYTICS_AUTH_PASSWORD=your_password
@@ -104,12 +106,18 @@ the adapter; the other output columns are written when they exist:
 
 - `Settings`: title, `External ID` (text), `Base Currency` (select: `USD` or `GBP`)
 - `Accounts`: title, `External ID` (text), `Account ID` (text), `Source` (select),
-  `Base Currency` (select), `Position Count` (number), `Currencies` (text)
+  `Base Currency` (select), `Position Count` (number), `Currencies` (text),
+  `Reporting Currency` (select), `Reporting Market Value` (number),
+  `Reporting Coverage` (number)
 - `Positions`: title, `External ID` (text), `Instrument ID` (text), `Symbol` (text),
   `Venue` (select), `Account` (text), `Asset Class` (select), `Quantity` (number),
   `Currency` (select), `Price` (number),
   `Market Value` (number), `Unrealized PnL` (number), `Cost Status` (select),
   `Effective Cost` (number), `Broker Cost` (number), `Cost Override` (number),
+  `Price As Of` (text), `Price Source` (select), `Price Quality` (select),
+  `Reporting Currency` (select), `Reporting Market Value` (number),
+  `Reporting Unrealized PnL` (number), `FX Rate` (number), `FX As Of` (text),
+  `FX Status` (select),
   `Theme` (select), `Notes` (text)
 
 `Base Currency`, `Cost Override`, `Theme`, and `Notes` are user-owned. Backend upserts do not
@@ -135,6 +143,9 @@ Migration `0006_instrument_identity` converts legacy symbol primary keys into de
 internal instrument IDs while preserving positions, manual and broker costs, and price history.
 New instruments can carry optional provider identifiers without requiring them, keeping the same
 model usable for equities, ETFs, and future Coinbase crypto products.
+
+Migration `0007_quotes_fx_reporting` adds provider mappings, quote metadata, FX observations,
+and reporting-coverage fields.
 
 Start the API locally:
 
@@ -205,8 +216,44 @@ and a short-lived session. The import command does not place trades.
 The importer stores broker-derived cost independently from a nullable manual override. An explicit
 manual value of zero is valid and is distinguishable from a missing cost. Re-importing IBKR data
 updates the broker value without clearing the override. Clearing the override restores the latest
-broker or reconstructed cost. Until the Notion override reader is implemented in the next slice,
-this behavior is available at the domain and repository layers rather than as a user-facing input.
+broker or reconstructed cost. This behavior is available through the Notion `Cost Override` field
+as well as the domain and repository layers.
+
+## Market-Data Mappings And Reporting Currency
+
+Run the position inspection command to obtain stable internal instrument IDs:
+
+```bash
+python -m pa_investing.scripts.show_positions
+```
+
+Create a CSV with one row per provider mapping:
+
+```csv
+instrument_id,provider,provider_symbol,provider_exchange,expected_currency,price_multiplier,enabled
+your-spgi-id,twelve_data,SPGI,NYSE,USD,1,true
+your-sgln-id,twelve_data,SGLN,LSE,GBX,0.01,true
+```
+
+`expected_currency` is the currency returned by the provider. `price_multiplier` converts that
+raw quote into the instrument's normalized trading currency; for example, `0.01` converts GBX
+to GBP. Exchange names must match the provider's accepted values.
+
+Import or update the mappings idempotently:
+
+```bash
+python -m pa_investing.scripts.import_market_data_mappings mappings.csv
+```
+
+Then configure `PA_MARKET_DATA_PROVIDER=twelve_data` and `PA_TWELVE_DATA_API_KEY`. The refresh
+workflow requests only mapped listings. It rejects currency or exchange mismatches, selects the
+newest valid persisted quote, and falls back to the timestamped broker mark when needed. A quote
+more than 50% away from the current broker/persisted mark is also quarantined as an unexplained
+jump instead of silently replacing the portfolio value.
+
+The reporting currency comes from the Notion `Portfolio` Settings row when available, otherwise
+`PA_DEFAULT_BASE_CURRENCY`. Missing FX leaves the position visible but excludes it from aggregate
+reporting totals. `Reporting Coverage` and `FX Status` make that incompleteness explicit.
 
 ## Refresh-And-Sync Workflow Trigger
 

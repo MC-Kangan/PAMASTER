@@ -9,6 +9,8 @@ from pa_investing.db.repositories import (
     AccountRepository,
     AppSettingRepository,
     AuditEventRepository,
+    FxRateRepository,
+    MarketDataMappingRepository,
     PortfolioSnapshotRepository,
     PositionRepository,
     PriceRepository,
@@ -18,6 +20,7 @@ from pa_investing.db.session import DatabaseSessionFactory
 from pa_investing.market_data.alpha_vantage import AlphaVantageProvider
 from pa_investing.market_data.interfaces import MarketDataProvider
 from pa_investing.market_data.manual_prices import ManualPriceProvider
+from pa_investing.market_data.twelve_data import TwelveDataProvider
 from pa_investing.notion.client import FakeNotionClient, NotionClient
 from pa_investing.notion.live import LiveNotionClient
 from pa_investing.notion.sync import NotionSync
@@ -40,6 +43,8 @@ def get_market_data_provider(
 ) -> MarketDataProvider:
     if settings.market_data_provider == "alpha_vantage":
         return AlphaVantageProvider(api_key=settings.alpha_vantage_api_key)
+    if settings.market_data_provider == "twelve_data":
+        return TwelveDataProvider(api_key=settings.twelve_data_api_key)
     return ManualPriceProvider(prices={})
 
 
@@ -86,6 +91,9 @@ def get_refresh_and_sync_workflow(
             commit=session.commit,
             account_repository=AccountRepository(session),
             app_setting_repository=AppSettingRepository(session),
+            market_data_mapping_repository=MarketDataMappingRepository(session),
+            fx_rate_repository=FxRateRepository(session),
+            default_base_currency=get_settings().default_base_currency,
         )
 
 

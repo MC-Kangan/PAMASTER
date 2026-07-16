@@ -228,3 +228,64 @@ def test_portfolio_payloads_never_write_user_owned_fields() -> None:
     )
     assert stored_account.properties["Position Count"] == NotionPropertyValue.number(1)
     assert "GBP: 210" in stored_account.body
+
+
+def test_reporting_payload_makes_stale_and_missing_fx_visible() -> None:
+    sync = NotionSync(FakeNotionClient())
+    stale = Position(
+        account_id="U1",
+        instrument=Instrument(
+            symbol="SGLN",
+            name="Gold",
+            asset_class=AssetClass.ETF,
+            currency="GBP",
+        ),
+        quantity=Decimal("10"),
+        average_cost=Decimal("20"),
+        latest_price=Decimal("21"),
+        reporting_currency="USD",
+        fx_rate=Decimal("1.3"),
+        fx_stale=True,
+    )
+    missing = Position(
+        account_id="U1",
+        instrument=Instrument(
+            symbol="ASML",
+            name="ASML",
+            asset_class=AssetClass.EQUITY,
+            currency="EUR",
+        ),
+        quantity=Decimal("1"),
+        average_cost=Decimal("800"),
+        latest_price=Decimal("900"),
+        reporting_currency="USD",
+    )
+    result = DailyReviewResult(
+        snapshot=PortfolioSnapshot(
+            snapshot_id="snap-fx",
+            observed_at=datetime(2026, 7, 15, tzinfo=UTC),
+            base_currency="USD",
+            nav=Decimal("273"),
+            gross_exposure=Decimal("273"),
+            net_exposure=Decimal("273"),
+            unrealized_pnl=Decimal("13"),
+            position_count=2,
+            valued_position_count=1,
+            reporting_coverage=Decimal("0.5"),
+        ),
+        positions=[stale, missing],
+        signals=[],
+    )
+
+    stale_payload = sync.build_position_payload(stale)
+    missing_payload = sync.build_position_payload(missing)
+    review_payload = sync.build_daily_review_payload(result)
+
+    assert stale_payload.properties["FX Status"] == NotionPropertyValue.select(
+        "stale"
+    )
+    assert missing_payload.properties["FX Status"] == NotionPropertyValue.select(
+        "missing"
+    )
+    assert "Missing FX: ASML" in review_payload.body
+    assert "Stale FX*: SGLN" in review_payload.body

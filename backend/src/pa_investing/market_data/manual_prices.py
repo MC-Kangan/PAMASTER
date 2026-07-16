@@ -3,12 +3,14 @@ from datetime import datetime
 from decimal import Decimal
 from pathlib import Path
 
-from pa_investing.domain.enums import AssetClass
+from pa_investing.domain.enums import AssetClass, QuoteQuality
 from pa_investing.domain.models import Instrument, PricePoint
 from pa_investing.market_data.interfaces import MarketDataProvider
 
 
 class ManualPriceProvider(MarketDataProvider):
+    provider_name = "manual"
+
     def __init__(self, prices: dict[str, PricePoint]) -> None:
         self.prices = prices
 
@@ -29,6 +31,7 @@ class ManualPriceProvider(MarketDataProvider):
                     price=Decimal(row["price"]),
                     observed_at=datetime.fromisoformat(row["observed_at"]),
                     provider="manual",
+                    quality=QuoteQuality.MANUAL,
                 )
         return cls(prices)
 

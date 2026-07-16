@@ -4,7 +4,11 @@ from collections.abc import Sequence
 from pa_investing.brokers.ibkr_client_portal import IbkrClientPortalConnector
 from pa_investing.brokers.ibkr_flex import IbkrFlexConnector
 from pa_investing.core.config import Settings
-from pa_investing.db.repositories import AccountRepository, PositionRepository
+from pa_investing.db.repositories import (
+    AccountRepository,
+    PositionRepository,
+    PriceRepository,
+)
 from pa_investing.db.session import DatabaseSessionFactory
 from pa_investing.workflows.broker_import import BrokerImportResult, BrokerImportWorkflow
 
@@ -26,6 +30,7 @@ def run_ibkr_import(
                 connector=resolved_connector,
                 account_repository=AccountRepository(session),
                 position_repository=PositionRepository(session),
+                price_repository=PriceRepository(session),
                 commit=session.commit,
             )
             result = workflow.run()

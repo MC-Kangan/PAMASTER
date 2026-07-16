@@ -65,6 +65,7 @@ def test_show_positions_prints_accounts_and_open_positions(capsys) -> None:
     assert "S&P Global Inc." in captured.out
     assert "CLOSED" not in captured.out
     assert "cost_basis_status" in captured.out
+    assert "instrument_id" in captured.out
     assert "broker" in captured.out
     assert "unrealized_pnl" in captured.out
     assert "Portfolio summary" in captured.out
@@ -105,7 +106,8 @@ def test_show_positions_handles_unavailable_cost_basis(capsys) -> None:
     assert "unavailable" in captured.out
     assert "Cost basis warnings" in captured.out
     assert "MBGL" in captured.out
+    assert "U1 | " in captured.out
     assert (
-        "U1 | MBGL | Mobility Global | equity | USD | 5 | 0 | 20.8 | 104 | "
+        " | MBGL | Mobility Global | equity | USD | 5 | 0 | 20.8 | 104 | "
         "unavailable | unavailable"
     ) in captured.out

@@ -39,7 +39,7 @@ def show_positions(
 
         print(f"Open positions: {len(positions)}")
         print(
-            "account_id | symbol | name | asset_class | currency | "
+            "account_id | instrument_id | symbol | name | asset_class | currency | "
             "quantity | avg_cost | price | mv | cost_basis_status | unrealized_pnl"
         )
         for position in positions:
@@ -47,6 +47,7 @@ def show_positions(
                 " | ".join(
                     [
                         position.account_id,
+                        position.instrument.instrument_id or "",
                         position.instrument.symbol,
                         position.instrument.name,
                         position.instrument.asset_class.value,
