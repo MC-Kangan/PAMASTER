@@ -379,13 +379,36 @@ class HistoricalDataRepository:
         if series is None or series.active_dataset_id is None:
             return None
         dataset = self.session.get(HistoricalDatasetRecord, series.active_dataset_id)
-        if (
-            dataset is None
-            or dataset.start_date > start_date
-            or dataset.end_date < end_date
-        ):
+        if dataset is None or not self._covers(dataset, start_date, end_date):
             return None
         return self.get_dataset(dataset.dataset_id)
+
+    def latest_covering_for_instrument(
+        self,
+        instrument_id: str,
+        start_date: date,
+        end_date: date,
+    ) -> HistoricalDataset | None:
+        series_rows = self.session.scalars(
+            select(HistoricalSeriesRecord).where(
+                HistoricalSeriesRecord.instrument_id == instrument_id,
+                HistoricalSeriesRecord.active_dataset_id.is_not(None),
+            )
+        ).all()
+        candidates: list[HistoricalDatasetRecord] = []
+        for series in series_rows:
+            if series.active_dataset_id is None:
+                continue
+            dataset = self.session.get(
+                HistoricalDatasetRecord,
+                series.active_dataset_id,
+            )
+            if dataset is not None and self._covers(dataset, start_date, end_date):
+                candidates.append(dataset)
+        if not candidates:
+            return None
+        newest = max(candidates, key=lambda dataset: dataset.fetched_at)
+        return self.get_dataset(newest.dataset_id)
 
     def latest(self, series_key: str) -> HistoricalDataset | None:
         series = self.session.get(HistoricalSeriesRecord, series_key)
@@ -447,6 +470,25 @@ class HistoricalDataRepository:
             volume=record.volume,
             dividend=record.dividend,
             split_ratio=record.split_ratio,
+        )
+
+    @staticmethod
+    def _covers(
+        dataset: HistoricalDatasetRecord,
+        start_date: date,
+        end_date: date,
+    ) -> bool:
+        coverage_start = start_date
+        while coverage_start.weekday() >= 5:
+            coverage_start += timedelta(days=1)
+        coverage_end = end_date
+        while coverage_end.weekday() >= 5:
+            coverage_end -= timedelta(days=1)
+        if coverage_start > coverage_end:
+            return False
+        return (
+            dataset.start_date <= coverage_start
+            and dataset.end_date >= coverage_end
         )
 
 

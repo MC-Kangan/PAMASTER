@@ -7,7 +7,7 @@ from pa_investing.db.repositories import (
     HistoricalDataRepository,
     ProviderRunRepository,
 )
-from pa_investing.domain.enums import ProviderRunStatus
+from pa_investing.domain.enums import InstrumentScope, ProviderRunStatus
 from pa_investing.domain.models import ProviderRun
 from pa_investing.instruments.resolution import InstrumentResolutionService
 from pa_investing.market_data.history.models import (
@@ -49,6 +49,7 @@ class HistoricalDataService:
             start_date,
             end_date,
             allow_stale=allow_stale,
+            promoted_instrument_id=instrument_id,
         )
 
     def get_for_research(
@@ -59,6 +60,8 @@ class HistoricalDataService:
         *,
         allow_stale: bool = False,
     ) -> HistoricalDataResult:
+        if instrument.scope is not InstrumentScope.RESEARCH:
+            raise ValueError("research entry point requires a research-scoped identity")
         return self._get(
             instrument,
             start_date,
@@ -73,6 +76,7 @@ class HistoricalDataService:
         end_date: date,
         *,
         allow_stale: bool,
+        promoted_instrument_id: str | None = None,
     ) -> HistoricalDataResult:
         request = HistoricalDataRequest(
             instrument=instrument,
@@ -85,6 +89,12 @@ class HistoricalDataService:
             request.start_date,
             request.end_date,
         )
+        if cached is None and promoted_instrument_id is not None:
+            cached = self.repository.latest_covering_for_instrument(
+                promoted_instrument_id,
+                request.start_date,
+                request.end_date,
+            )
         if cached is not None:
             return HistoricalDataResult(dataset=cached)
 

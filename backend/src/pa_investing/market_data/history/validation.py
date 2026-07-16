@@ -81,15 +81,6 @@ def validate_dataset(
             "adjustment_mismatch",
             "dataset adjustment mode does not satisfy the request",
         )
-    if (
-        trading_dates[0] > request.start_date
-        or trading_dates[-1] < request.end_date
-    ):
-        return _rejected(
-            "insufficient_coverage",
-            "dataset does not cover the complete requested date range",
-        )
-
     expected_dates = (
         {
             trading_date
@@ -99,6 +90,14 @@ def validate_dataset(
         if calendar_dates is not None
         else _weekday_dates(request.start_date, request.end_date)
     )
+    coverage_start = min(expected_dates) if expected_dates else request.start_date
+    coverage_end = max(expected_dates) if expected_dates else request.end_date
+    if trading_dates[0] > coverage_start or trading_dates[-1] < coverage_end:
+        return _rejected(
+            "insufficient_coverage",
+            "dataset does not cover the complete requested date range",
+        )
+
     actual_dates = set(trading_dates)
     warnings = [
         f"missing expected session: {missing_date.isoformat()}"

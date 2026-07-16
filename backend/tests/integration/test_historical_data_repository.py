@@ -156,3 +156,39 @@ def test_latest_covering_does_not_return_partial_date_window() -> None:
     assert covered.dataset_id == "dataset-1"
     assert missing_left is None
     assert missing_right is None
+
+
+def test_latest_covering_treats_weekend_boundaries_as_non_sessions() -> None:
+    engine = create_engine("sqlite+pysqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    session_factory = sessionmaker(bind=engine)
+    extended = _dataset().model_copy(
+        update={
+            "bars": [
+                _bar(date(2026, 7, 13), "171", AdjustmentMode.ALL),
+                *_dataset().bars,
+                _bar(date(2026, 7, 16), "174", AdjustmentMode.ALL),
+                _bar(date(2026, 7, 17), "175", AdjustmentMode.ALL),
+            ],
+            "unadjusted_bars": [
+                _bar(date(2026, 7, 13), "174", AdjustmentMode.NONE),
+                *(_dataset().unadjusted_bars or []),
+                _bar(date(2026, 7, 16), "177", AdjustmentMode.NONE),
+                _bar(date(2026, 7, 17), "178", AdjustmentMode.NONE),
+            ],
+        }
+    )
+
+    with session_factory() as session:
+        repository = HistoricalDataRepository(session)
+        repository.save_dataset(_research_instrument(), extended)
+        session.commit()
+
+        covered = repository.latest_covering(
+            _dataset().series_key,
+            date(2026, 7, 12),
+            date(2026, 7, 19),
+        )
+
+    assert covered is not None
+    assert covered.dataset_id == "dataset-1"

@@ -6,7 +6,11 @@ from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 
 from pa_investing.db.base import Base
-from pa_investing.db.models import ProviderRunRecord
+from pa_investing.db.models import (
+    InstrumentRecord,
+    MarketDataMappingRecord,
+    ProviderRunRecord,
+)
 from pa_investing.db.repositories import HistoricalDataRepository
 from pa_investing.domain.enums import AdjustmentMode, InstrumentScope
 from pa_investing.instruments.resolution import InstrumentResolutionService
@@ -177,15 +181,15 @@ def test_failed_fetch_can_return_explicit_stale_dataset_without_replacing_it() -
         with pytest.raises(HistoricalDataUnavailable):
             service.get_for_research(
                 _instrument(),
-                date(2025, 1, 5),
-                date(2025, 1, 11),
+                date(2025, 1, 3),
+                date(2025, 1, 13),
                 allow_stale=False,
             )
 
         stale = service.get_for_research(
             _instrument(),
-            date(2025, 1, 5),
-            date(2025, 1, 11),
+            date(2025, 1, 3),
+            date(2025, 1, 13),
             allow_stale=True,
         )
         active = repository.latest(_dataset().series_key)
@@ -195,3 +199,84 @@ def test_failed_fetch_can_return_explicit_stale_dataset_without_replacing_it() -
     assert stale.attempts[0].error_code == "timeout"
     assert active is not None
     assert active.dataset_id == "dataset-1"
+
+
+def test_promoted_research_dataset_is_reused_by_portfolio_requests() -> None:
+    engine = create_engine("sqlite+pysqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    session_factory = sessionmaker(bind=engine)
+
+    with session_factory() as session:
+        session.add(
+            InstrumentRecord(
+                instrument_id="instrument-nvda",
+                symbol="NVDA",
+                name="NVIDIA",
+                asset_class="equity",
+                currency="USD",
+                venue="NASDAQ",
+            )
+        )
+        session.add(
+            MarketDataMappingRecord(
+                instrument_id="instrument-nvda",
+                provider="yahoo",
+                provider_symbol="NVDA",
+                provider_exchange="NASDAQ",
+                expected_currency="USD",
+                price_multiplier=Decimal("1"),
+                enabled=True,
+            )
+        )
+        repository = HistoricalDataRepository(session)
+        repository.save_dataset(_instrument(), _dataset())
+        repository.promote_series(
+            series_key=_dataset().series_key,
+            instrument_id="instrument-nvda",
+        )
+        session.commit()
+        router = StubRouter()
+        service = HistoricalDataService(
+            session=session,
+            repository=repository,
+            resolver=InstrumentResolutionService(session=session),
+            router=router,
+        )
+
+        result = service.get_for_portfolio(
+            "instrument-nvda",
+            date(2025, 1, 6),
+            date(2025, 1, 10),
+        )
+
+    assert result.dataset.dataset_id == "dataset-1"
+    assert router.calls == 0
+
+
+def test_research_entry_point_rejects_portfolio_identity() -> None:
+    engine = create_engine("sqlite+pysqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    session_factory = sessionmaker(bind=engine)
+
+    with session_factory() as session:
+        service = HistoricalDataService(
+            session=session,
+            repository=HistoricalDataRepository(session),
+            resolver=InstrumentResolutionService(session=session),
+            router=StubRouter(),
+        )
+        portfolio_ref = HistoricalInstrumentRef(
+            scope=InstrumentScope.PORTFOLIO,
+            instrument_id="instrument-nvda",
+            display_symbol="NVDA",
+            asset_class="equity",
+            currency="USD",
+            exchange="NASDAQ",
+        )
+
+        with pytest.raises(ValueError, match="research-scoped"):
+            service.get_for_research(
+                portfolio_ref,
+                date(2025, 1, 6),
+                date(2025, 1, 10),
+            )

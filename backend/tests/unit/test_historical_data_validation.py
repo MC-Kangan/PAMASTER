@@ -197,3 +197,24 @@ def test_missing_weekdays_warn_but_exchange_holidays_do_not() -> None:
     assert without_calendar.warnings == ["missing expected session: 2026-07-15"]
     assert with_calendar.accepted is True
     assert with_calendar.warnings == []
+
+
+def test_weekend_boundaries_use_first_and_last_expected_session() -> None:
+    request = _request(
+        start_date=date(2026, 7, 11),
+        end_date=date(2026, 7, 19),
+    )
+    dataset = _dataset(
+        [
+            _bar(date(2026, 7, 13)),
+            _bar(date(2026, 7, 14)),
+            _bar(date(2026, 7, 15)),
+            _bar(date(2026, 7, 16)),
+            _bar(date(2026, 7, 17)),
+        ]
+    )
+
+    result = _validate(request, dataset)
+
+    assert result.accepted is True
+    assert result.warnings == []
