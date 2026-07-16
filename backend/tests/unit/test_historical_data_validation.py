@@ -23,6 +23,7 @@ def _request(
             asset_class="equity",
             currency="USD",
             exchange="NASDAQ",
+            provider_exchanges={"test": "NASDAQ"},
         ),
         start_date=start_date,
         end_date=end_date,

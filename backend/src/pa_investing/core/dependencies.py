@@ -12,6 +12,7 @@ from pa_investing.db.repositories import (
     AuditEventRepository,
     BrokerReconciliationRepository,
     FxRateRepository,
+    HistoricalDataRepository,
     MarketDataMappingRepository,
     PortfolioSnapshotRepository,
     PositionRepository,
@@ -21,7 +22,18 @@ from pa_investing.db.repositories import (
     TransactionRepository,
 )
 from pa_investing.db.session import DatabaseSessionFactory
+from pa_investing.instruments.resolution import InstrumentResolutionService
+from pa_investing.instruments.searchers import (
+    TwelveDataInstrumentSearcher,
+    YahooInstrumentSearcher,
+)
 from pa_investing.market_data.alpha_vantage import AlphaVantageProvider
+from pa_investing.market_data.history.providers import (
+    TwelveDataHistoricalDataProvider,
+    YahooHistoricalDataProvider,
+)
+from pa_investing.market_data.history.router import HistoricalDataRouter
+from pa_investing.market_data.history.service import HistoricalDataService
 from pa_investing.market_data.interfaces import MarketDataProvider
 from pa_investing.market_data.manual_prices import ManualPriceProvider
 from pa_investing.market_data.twelve_data import TwelveDataProvider
@@ -143,4 +155,41 @@ def get_operations_analysis_context() -> Iterator[OperationsAnalysisContext]:
             transaction_repository=TransactionRepository(session),
             reconciliation_repository=BrokerReconciliationRepository(session),
             provider_run_repository=ProviderRunRepository(session),
+        )
+
+
+def get_instrument_resolution_service() -> Iterator[InstrumentResolutionService]:
+    session_factory = get_database_session_factory()
+    settings = get_settings()
+    with session_factory.session() as session:
+        yield InstrumentResolutionService(
+            session=session,
+            searchers=[
+                YahooInstrumentSearcher(),
+                TwelveDataInstrumentSearcher(
+                    api_key=settings.twelve_data_api_key
+                ),
+            ],
+        )
+
+
+def get_historical_data_service() -> Iterator[HistoricalDataService]:
+    session_factory = get_database_session_factory()
+    settings = get_settings()
+    with session_factory.session() as session:
+        repository = HistoricalDataRepository(session)
+        resolver = InstrumentResolutionService(session=session)
+        router = HistoricalDataRouter(
+            [
+                YahooHistoricalDataProvider(),
+                TwelveDataHistoricalDataProvider(
+                    api_key=settings.twelve_data_api_key
+                ),
+            ]
+        )
+        yield HistoricalDataService(
+            session=session,
+            repository=repository,
+            resolver=resolver,
+            router=router,
         )

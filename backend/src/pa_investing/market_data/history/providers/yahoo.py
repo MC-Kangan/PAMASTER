@@ -78,16 +78,15 @@ class YahooHistoricalDataProvider:
                     f"{request.instrument.currency}"
                 ),
             )
-        if (
-            request.instrument.exchange
-            and exchange
-            and exchange != request.instrument.exchange
-        ):
+        expected_exchange = request.instrument.provider_exchanges.get(
+            self.provider_name
+        )
+        if expected_exchange and exchange and exchange != expected_exchange:
             raise HistoricalProviderError(
                 code="exchange_mismatch",
                 message=(
                     f"Yahoo exchange {exchange} does not match "
-                    f"{request.instrument.exchange}"
+                    f"{expected_exchange}"
                 ),
             )
 
@@ -176,7 +175,7 @@ class YahooHistoricalDataProvider:
             series_key=request.series_key,
             provider=self.provider_name,
             provider_symbol=symbol,
-            provider_exchange=exchange or request.instrument.exchange,
+            provider_exchange=exchange or expected_exchange,
             currency=currency,
             fetched_at=self.clock(),
             bars=adjusted_bars,

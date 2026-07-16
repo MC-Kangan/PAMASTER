@@ -1,8 +1,8 @@
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from decimal import Decimal
 from typing import Annotated
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import HTMLResponse
 
 from pa_investing.analytics.performance import (
@@ -16,6 +16,7 @@ from pa_investing.api.auth import require_analytics_auth, require_workflow_auth
 from pa_investing.api.schemas import (
     CurrentHoldingResponse,
     CurrentPortfolioResponse,
+    HistoricalResearchRequest,
     OperationsResponse,
     PerformanceHistoryResponse,
     PerformancePointResponse,
@@ -29,6 +30,8 @@ from pa_investing.core.config import Settings
 from pa_investing.core.dependencies import (
     OperationsAnalysisContext,
     PortfolioAnalysisContext,
+    get_historical_data_service,
+    get_instrument_resolution_service,
     get_operations_analysis_context,
     get_portfolio_analysis_context,
     get_portfolio_snapshot_repository,
@@ -36,6 +39,13 @@ from pa_investing.core.dependencies import (
     get_settings,
 )
 from pa_investing.db.repositories import PortfolioSnapshotRepository
+from pa_investing.instruments.resolution import (
+    InstrumentResolutionService,
+    InstrumentSearchResult,
+)
+from pa_investing.market_data.history.models import HistoricalDataResult
+from pa_investing.market_data.history.router import HistoricalDataUnavailable
+from pa_investing.market_data.history.service import HistoricalDataService
 from pa_investing.notion.sync import PORTFOLIO_BASE_CURRENCY_KEY
 from pa_investing.presentation.fields import serialize_decimal
 from pa_investing.workflows.refresh_and_sync import RefreshAndSyncWorkflow
@@ -46,6 +56,75 @@ router = APIRouter()
 @router.get("/health")
 def health() -> dict[str, str]:
     return {"status": "ok"}
+
+
+@router.get(
+    "/analysis/instruments/search",
+    response_model=InstrumentSearchResult,
+)
+def search_instruments(
+    q: str,
+    service: Annotated[
+        InstrumentResolutionService,
+        Depends(get_instrument_resolution_service),
+    ],
+    _: Annotated[None, Depends(require_analytics_auth)],
+) -> InstrumentSearchResult:
+    return service.search(q)
+
+
+@router.get(
+    "/analysis/market-data/{instrument_id}",
+    response_model=HistoricalDataResult,
+)
+def portfolio_historical_data(
+    instrument_id: str,
+    start: date,
+    end: date,
+    service: Annotated[
+        HistoricalDataService,
+        Depends(get_historical_data_service),
+    ],
+    _: Annotated[None, Depends(require_analytics_auth)],
+    allow_stale: bool = False,
+) -> HistoricalDataResult:
+    try:
+        return service.get_for_portfolio(
+            instrument_id,
+            start,
+            end,
+            allow_stale=allow_stale,
+        )
+    except KeyError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(exc),
+        ) from exc
+    except HistoricalDataUnavailable as exc:
+        raise _historical_unavailable(exc) from exc
+
+
+@router.post(
+    "/analysis/market-data/research",
+    response_model=HistoricalDataResult,
+)
+def research_historical_data(
+    payload: HistoricalResearchRequest,
+    service: Annotated[
+        HistoricalDataService,
+        Depends(get_historical_data_service),
+    ],
+    _: Annotated[None, Depends(require_analytics_auth)],
+) -> HistoricalDataResult:
+    try:
+        return service.get_for_research(
+            payload.instrument,
+            payload.start_date,
+            payload.end_date,
+            allow_stale=payload.allow_stale,
+        )
+    except HistoricalDataUnavailable as exc:
+        raise _historical_unavailable(exc) from exc
 
 
 @router.get("/analysis/portfolio", response_class=HTMLResponse)
@@ -257,3 +336,22 @@ def _format_decimal_or_none(value: Decimal | None) -> str | None:
     if value is None:
         return None
     return _format_decimal(value)
+
+
+def _historical_unavailable(
+    exc: HistoricalDataUnavailable,
+) -> HTTPException:
+    return HTTPException(
+        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+        detail={
+            "message": str(exc),
+            "attempts": [
+                {
+                    "provider": attempt.provider,
+                    "code": attempt.error_code,
+                    "message": attempt.message,
+                }
+                for attempt in exc.attempts
+            ],
+        },
+    )

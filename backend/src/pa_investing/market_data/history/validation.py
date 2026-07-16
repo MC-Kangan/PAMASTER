@@ -54,10 +54,11 @@ def validate_dataset(
         return _rejected("empty_dataset", "provider returned no daily bars")
     if dataset.currency.upper() != request.instrument.currency:
         return _rejected("currency_mismatch", "dataset currency does not match listing")
+    expected_exchange = request.instrument.provider_exchanges.get(dataset.provider)
     if (
-        request.instrument.exchange
+        expected_exchange
         and dataset.provider_exchange
-        and dataset.provider_exchange.upper() != request.instrument.exchange
+        and dataset.provider_exchange.upper() != expected_exchange
     ):
         return _rejected("exchange_mismatch", "dataset exchange does not match listing")
 

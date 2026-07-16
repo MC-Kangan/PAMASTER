@@ -1,7 +1,9 @@
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
 
 from pydantic import BaseModel
+
+from pa_investing.market_data.history.models import HistoricalInstrumentRef
 
 
 class RefreshAndSyncRequest(BaseModel):
@@ -100,3 +102,10 @@ class ProviderRunResponse(BaseModel):
 class OperationsResponse(BaseModel):
     providers: list[ProviderRunResponse]
     reconciliations: list[ReconciliationResponse]
+
+
+class HistoricalResearchRequest(BaseModel):
+    instrument: HistoricalInstrumentRef
+    start_date: date
+    end_date: date
+    allow_stale: bool = False

@@ -24,6 +24,7 @@ def _request(*, mapped: bool = True) -> HistoricalDataRequest:
             currency="GBP",
             exchange="LSE",
             provider_symbols={"yahoo": "SGLN.L"} if mapped else {},
+            provider_exchanges={"yahoo": "LSE"},
         ),
         start_date=date(2026, 7, 13),
         end_date=date(2026, 7, 14),

@@ -7,11 +7,14 @@ from fastapi.testclient import TestClient
 from pa_investing.core.config import Settings
 from pa_investing.core.dependencies import (
     OperationsAnalysisContext,
+    get_historical_data_service,
+    get_instrument_resolution_service,
     get_operations_analysis_context,
     get_refresh_and_sync_workflow,
     get_settings,
 )
 from pa_investing.domain.enums import (
+    AdjustmentMode,
     AssetClass,
     ProviderRunStatus,
     ReconciliationStatus,
@@ -29,7 +32,17 @@ from pa_investing.domain.models import (
     Signal,
     Transaction,
 )
+from pa_investing.instruments.resolution import (
+    InstrumentCandidate,
+    InstrumentSearchResult,
+)
 from pa_investing.main import create_app
+from pa_investing.market_data.history.models import (
+    DailyBar,
+    HistoricalDataResult,
+    HistoricalDataset,
+    ProviderAttempt,
+)
 from pa_investing.workflows.agent_api import DailyReviewResult
 
 
@@ -75,6 +88,93 @@ class FakeRefreshAndSyncWorkflow:
         )
 
 
+class FakeInstrumentResolutionService:
+    def search(self, query: str) -> InstrumentSearchResult:
+        assert query == "NVDA"
+        return InstrumentSearchResult(
+            query=query,
+            candidates=[
+                InstrumentCandidate(
+                    display_symbol="NVDA",
+                    name="NVIDIA",
+                    asset_class="equity",
+                    currency="USD",
+                    exchange="NASDAQ",
+                    mic_code="XNAS",
+                    provider_symbols={"yahoo": "NVDA"},
+                    provider_exchanges={"yahoo": "NASDAQ"},
+                    provider_currencies={"yahoo": "USD"},
+                    confidence=Decimal("0.95"),
+                )
+            ],
+            unambiguous=True,
+        )
+
+
+class FakeHistoricalDataService:
+    def get_for_portfolio(
+        self,
+        instrument_id: str,
+        start_date,
+        end_date,
+        *,
+        allow_stale: bool = False,
+    ) -> HistoricalDataResult:
+        assert instrument_id == "instrument-1"
+        assert str(start_date) == "2025-01-06"
+        assert str(end_date) == "2025-01-10"
+        assert allow_stale is False
+        return self._result()
+
+    def get_for_research(
+        self,
+        instrument,
+        start_date,
+        end_date,
+        *,
+        allow_stale: bool = False,
+    ) -> HistoricalDataResult:
+        assert instrument.display_symbol == "NVDA"
+        assert instrument.exchange == "NASDAQ"
+        assert str(start_date) == "2025-01-06"
+        assert str(end_date) == "2025-01-10"
+        return self._result()
+
+    @staticmethod
+    def _result() -> HistoricalDataResult:
+        timestamp = datetime(2025, 1, 11, tzinfo=UTC)
+        return HistoricalDataResult(
+            dataset=HistoricalDataset(
+                dataset_id="dataset-1",
+                series_key="research|NVDA|NASDAQ|USD|all",
+                provider="yahoo",
+                provider_symbol="NVDA",
+                provider_exchange="NASDAQ",
+                currency="USD",
+                fetched_at=timestamp,
+                bars=[
+                    DailyBar(
+                        trading_date=datetime(2025, 1, 6).date(),
+                        open=Decimal("99"),
+                        high=Decimal("101"),
+                        low=Decimal("98"),
+                        close=Decimal("100"),
+                        adjustment_mode=AdjustmentMode.ALL,
+                    )
+                ],
+                warnings=["sample warning"],
+            ),
+            attempts=[
+                ProviderAttempt(
+                    provider="yahoo",
+                    accepted=True,
+                    started_at=timestamp,
+                    finished_at=timestamp,
+                )
+            ],
+        )
+
+
 def _public_test_client() -> TestClient:
     app = create_app()
     app.dependency_overrides[get_settings] = lambda: Settings(
@@ -91,6 +191,55 @@ def test_health_route() -> None:
 
     assert response.status_code == 200
     assert response.json() == {"status": "ok"}
+
+
+def test_historical_data_search_and_fetch_routes_are_thin_and_typed() -> None:
+    app = create_app()
+    app.dependency_overrides[get_settings] = lambda: Settings(
+        analytics_auth_enabled=False
+    )
+    app.dependency_overrides[get_instrument_resolution_service] = (
+        lambda: FakeInstrumentResolutionService()
+    )
+    app.dependency_overrides[get_historical_data_service] = (
+        lambda: FakeHistoricalDataService()
+    )
+    client = TestClient(app)
+
+    search = client.get("/analysis/instruments/search?q=NVDA")
+    portfolio = client.get(
+        "/analysis/market-data/instrument-1"
+        "?start=2025-01-06&end=2025-01-10"
+    )
+    research = client.post(
+        "/analysis/market-data/research",
+        json={
+            "instrument": {
+                "scope": "research",
+                "display_symbol": "NVDA",
+                "asset_class": "equity",
+                "currency": "USD",
+                "exchange": "NASDAQ",
+                "provider_symbols": {"yahoo": "NVDA"},
+            },
+            "start_date": "2025-01-06",
+            "end_date": "2025-01-10",
+        },
+    )
+
+    assert search.status_code == 200
+    assert search.json()["unambiguous"] is True
+    assert portfolio.status_code == 200
+    assert research.status_code == 200
+    for response in (portfolio, research):
+        payload = response.json()
+        assert payload["dataset"]["dataset_id"] == "dataset-1"
+        assert payload["dataset"]["provider"] == "yahoo"
+        assert payload["dataset"]["bars"][0]["adjustment_mode"] == "all"
+        assert payload["stale"] is False
+        assert payload["attempts"][0]["accepted"] is True
+        assert "api_key" not in response.text
+        assert "/private/" not in response.text
 
 
 def test_portfolio_analysis_page() -> None:
