@@ -142,3 +142,4 @@ def test_research_search_accepts_bloomberg_style_market_code() -> None:
 
     assert result.unambiguous is True
     assert result.candidates[0].canonical_reference == "ADBE US"
+    assert result.candidates[0].model_dump()["canonical_reference"] == "ADBE US"

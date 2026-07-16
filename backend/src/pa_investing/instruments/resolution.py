@@ -3,7 +3,13 @@ from contextlib import suppress
 from decimal import Decimal
 from typing import Protocol, Self
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    Field,
+    computed_field,
+    field_validator,
+    model_validator,
+)
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -35,6 +41,7 @@ class InstrumentCandidate(BaseModel):
     provider_ids: dict[str, str] = Field(default_factory=dict)
     confidence: Decimal
 
+    @computed_field
     @property
     def canonical_reference(self) -> str:
         market_code = DEFAULT_MARKET_CODES.market_for_exchange(self.exchange)

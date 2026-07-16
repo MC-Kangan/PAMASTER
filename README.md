@@ -192,6 +192,50 @@ Its current contract is deliberately narrow:
 IBKR TWS/Gateway historical data is intentionally not part of this slice. It remains a separate,
 optional overlay so the NAS and research library do not depend on a logged-in IBKR session.
 
+### Canonical Instrument References
+
+User-facing instrument references use a compact Bloomberg-style convention while provider
+symbols remain internal mappings:
+
+```text
+ADBE US
+GLEN LN
+SMH LN
+```
+
+The first token is the display symbol and the second is a canonical market code. Search accepts
+case-insensitive input and normalizes aliases such as `U.S.` to `US`. An accepted candidate
+returns `canonical_reference` alongside its exact exchange, currency, and provider mappings.
+For example, `GLEN LN` may map to Yahoo `GLEN.L`, Twelve Data `GLEN` on `LSE`, and an IBKR
+contract identifier without exposing those provider-specific values to finance skills.
+
+### Deterministic Finance Skills
+
+The reusable finance layer lives under `pa_investing.finance`. Skills consume an already
+validated, adjusted daily `HistoricalDataset`; they do not download data or create PA signals.
+The default bundle is:
+
+```text
+daily_market_review.v1
+├── technical_snapshot.v1
+├── candlestick_events.v1
+└── market_risk_snapshot.v1
+```
+
+`FinanceAnalysisService` supports both portfolio instruments and standalone research:
+
+```python
+result = service.analyze_portfolio(
+    instrument_id,
+    as_of=date.today(),
+)
+```
+
+The default lookback is 365 calendar days. Callers may select explicit skill IDs, override
+validated thresholds, or register additional deterministic or model-assisted skills through
+`SkillRegistry`. Skill failures are isolated and produce a partial analysis with structured
+warnings and a deterministic summary.
+
 ## Code Structure
 
 The main application code lives in [backend/src/pa_investing](backend/src/pa_investing/).
