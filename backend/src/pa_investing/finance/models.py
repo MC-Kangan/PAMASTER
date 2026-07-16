@@ -1,0 +1,122 @@
+from datetime import date
+from decimal import Decimal
+from enum import StrEnum
+from typing import Protocol
+
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+from pa_investing.market_data.history.models import (
+    HistoricalDataset,
+    HistoricalInstrumentRef,
+)
+
+MetricValue = Decimal | int | float | str | bool | None
+
+
+class ExecutionMode(StrEnum):
+    DETERMINISTIC = "deterministic"
+    MODEL_ASSISTED = "model_assisted"
+
+
+class SkillStatus(StrEnum):
+    SUCCESS = "success"
+    PARTIAL = "partial"
+    FAILED = "failed"
+
+
+class AnalysisStatus(StrEnum):
+    SUCCESS = "success"
+    PARTIAL = "partial"
+    FAILED = "failed"
+
+
+class Direction(StrEnum):
+    BULLISH = "bullish"
+    BEARISH = "bearish"
+    NEUTRAL = "neutral"
+    MIXED = "mixed"
+
+
+class FindingSeverity(StrEnum):
+    INFO = "info"
+    WATCH = "watch"
+    ATTENTION = "attention"
+
+
+class SkillMetadata(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    skill_id: str
+    name: str
+    description: str
+    execution_mode: ExecutionMode
+    min_bars: int = Field(ge=1)
+    default_thresholds: dict[str, Decimal] = Field(default_factory=dict)
+
+    @field_validator("skill_id")
+    @classmethod
+    def require_versioned_id(cls, value: str) -> str:
+        normalized = value.strip().lower()
+        if ".v" not in normalized:
+            raise ValueError("skill_id must include a version suffix")
+        return normalized
+
+
+class AnalysisRequest(BaseModel):
+    instrument: HistoricalInstrumentRef
+    as_of: date
+    lookback_days: int = Field(default=365, ge=1)
+    bundle: str = "daily_market_review.v1"
+    skill_ids: tuple[str, ...] = ()
+    threshold_overrides: dict[str, dict[str, Decimal]] = Field(
+        default_factory=dict
+    )
+
+    @field_validator("bundle")
+    @classmethod
+    def normalize_bundle(cls, value: str) -> str:
+        return value.strip().lower()
+
+    @field_validator("skill_ids")
+    @classmethod
+    def normalize_skill_ids(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        return tuple(item.strip().lower() for item in value)
+
+
+class Finding(BaseModel):
+    code: str
+    severity: FindingSeverity
+    direction: Direction
+    summary: str
+    observed_on: date | None = None
+    values: dict[str, MetricValue] = Field(default_factory=dict)
+
+
+class SkillResult(BaseModel):
+    skill_id: str
+    status: SkillStatus
+    metrics: dict[str, MetricValue] = Field(default_factory=dict)
+    findings: list[Finding] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+    error_code: str | None = None
+    error_message: str | None = None
+
+
+class AnalysisResult(BaseModel):
+    status: AnalysisStatus
+    instrument: HistoricalInstrumentRef
+    as_of: date
+    dataset_id: str
+    provider: str
+    skill_results: list[SkillResult]
+    summary: list[str]
+
+
+class FinanceSkill(Protocol):
+    metadata: SkillMetadata
+
+    def run(
+        self,
+        request: AnalysisRequest,
+        dataset: HistoricalDataset,
+    ) -> SkillResult: ...
