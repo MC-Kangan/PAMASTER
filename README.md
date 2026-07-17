@@ -1,201 +1,210 @@
-# PA Investing Workflow
+# PA Investing
 
-This repository contains a personal-account investing workflow that is being built in phases.
+PA Investing is a personal, analysis-only investing system. It imports a portfolio, normalizes
+instrument identities across providers, refreshes market data, runs deterministic analysis, and
+publishes a concise daily review to Notion.
 
-The working architecture today is:
+The project is deliberately small at the core:
 
-- Notion as the first summary and operating surface
-- Python backend as the compute and workflow layer
-- PostgreSQL as the structured source of truth
-- browser analytics pages for deeper drilldown on phone and desktop
+- **PostgreSQL** is the source of truth.
+- **Python/FastAPI** owns workflows, validation, calculations, and APIs.
+- **Notion** is the operating dashboard, not a database of record.
+- **IBKR Flex** is the preferred portfolio import path.
+- **Yahoo Finance** is the default daily-history provider; **Twelve Data** is the fallback.
+- The system does **not** place orders or execute trades.
 
-The system is intentionally analysis-only. It does not place trades or submit broker orders.
+> This is personal research software, not investment advice. Validate data and decisions against
+> broker records before acting on them.
 
-The current mixed-currency workflow supports explicit provider mappings, USD/GBP FX conversion,
-and IBKR Flex cash balances. Cash-flow-aware returns and broker NAV reconciliation are still
-required before drawdown and return outputs are treated as investment-grade analytics.
+## Project Status
 
-## Current Status
+The repository has a working end-to-end MVP rather than only scaffolding.
 
-The project has:
+| Area | Current state |
+| --- | --- |
+| Portfolio ingestion | IBKR Flex, IBKR Client Portal Gateway for local testing, and CSV/demo paths |
+| Instrument identity | Stable internal IDs plus Bloomberg-style references such as `ADBE US` and provider mappings |
+| Current prices and FX | Mapped quotes, validation, persistence, and USD/GBP reporting conversion |
+| Daily history | Validated, immutable datasets with Yahoo-to-Twelve-Data whole-series fallback |
+| Finance analysis | Technical, candlestick, and market-risk skills with deterministic summaries |
+| Daily review | Portfolio snapshot, signals, finance evidence, and Notion synchronization |
+| Operations | Provider-run records, transaction ledger, and broker NAV/cash reconciliation records |
+| Browser/API | Current portfolio, performance, history, operations, and workflow endpoints |
+| Trade execution | Intentionally not implemented |
 
-- completed the Phase 1 backend foundation
-- completed the first visible Phase 2 MVP loop for demo data
-- completed the Notion portfolio settings/accounts/positions backend slice
-- completed the general internal instrument identity backend slice
-- completed the mapped quote, FX, and reporting-currency backend slice
-- completed the reusable daily historical-data routing foundation
+The current analytics are useful for daily monitoring, but returns and drawdown are not yet
+cash-flow-aware. Treat them as indicative until deposits, withdrawals, dividends, fees, and broker
+NAV reconciliation are fully incorporated into performance calculations.
 
-In practical terms, the repo can now:
+## Architecture
 
-- seed a demo portfolio
-- import IBKR positions through a NAS-suitable Flex Web Service connector
-- preserve broker cost separately from persistent manual cost overrides
-- identify instruments internally instead of treating ticker symbols as database keys
-- retain optional generic provider identifiers such as IBKR `conid`
-- support the same display symbol on different venues without merging positions or prices
-- exclude positions with unavailable cost basis from reliable P&L totals
-- refresh prices through a live market-data adapter
-- map each instrument to a provider symbol/listing and normalize minor currency units
-- persist timestamped quotes and FX rates with source and quality metadata
-- calculate USD/GBP reporting values with explicit incomplete-data coverage
-- compute and persist snapshots and signals
-- sync `Signals` and `Daily Review` to Notion
-- read portfolio base currency and manual cost overrides from Notion
-- sync compact `Settings`, `Accounts`, and `Positions` views without overwriting user fields
-- show all holdings, rounded review totals, portfolio weights, and prior-day NAV change in Notion
-- expose a manual refresh API
-- expose a performance-history API
-- expose responsive allocation and NAV-history charts for phone and desktop browsers
-- protect browser analytics routes with a simple auth gate
-- support a private NAS deployment model using Tailscale, HTTPS, and application authentication
-- provide a NAS-runnable command for the fixed snapshot cadence
-- fetch, validate, persist, and reuse daily historical bars for portfolio and research use
-- fall back from Yahoo to Twelve Data without stitching providers into one series
-- preserve adjusted and least-adjusted bar provenance with explicit stale-data behavior
+```mermaid
+flowchart LR
+    IBKR["IBKR Flex / Gateway"] --> Import["Broker import"]
+    NotionInput["Notion user inputs"] --> Refresh["Refresh and sync workflow"]
+    Import --> DB[(PostgreSQL)]
+    Yahoo["Yahoo Finance"] --> History["Historical data router"]
+    Twelve["Twelve Data"] --> History
+    DB --> Refresh
+    History --> Skills["Finance skill runner"]
+    Refresh --> Skills
+    Skills --> Review["Daily review"]
+    Review --> DB
+    Review --> Notion["Notion dashboard"]
+    DB --> API["FastAPI analytics"]
+```
 
-## What Has Been Implemented
+The important boundaries are:
 
-### Phase 1: Backend Foundation
+1. Provider symbols never become portfolio identity. Instruments have stable internal IDs.
+2. Research uses readable canonical references; provider-specific symbols remain mappings.
+3. Historical providers return one complete dataset. The router never silently stitches sources.
+4. Finance skills consume validated evidence and return structured results. They do not fetch data,
+   write PA signals, or synchronize Notion themselves.
+5. The portfolio transaction commits before external Notion writes and finance enrichment.
+6. A failed skill or provider is recorded and isolated rather than hidden.
 
-Implemented:
+## Repository Layout
 
-- FastAPI backend scaffold
-- SQLAlchemy models and repositories
-- Alembic migrations
-- pytest and Ruff setup
-- Docker and Docker Compose scaffold
-- domain models for:
-  - accounts
-  - instruments
-  - positions
-  - price points
-  - portfolio snapshots
-  - signals
-- CSV position import
-- broker import workflow boundary
-- manual price provider
-- deterministic sizing and stop/reference signal rules
-- fake Notion client for local and test flows
-- daily review workflow and persistence
-- minimal analytics pages and API routes
+```text
+PAMASTER/
+├── README.md                  # Project overview and contributor entry point
+├── backend/
+│   ├── README.md              # Detailed setup, environment, and operating runbook
+│   ├── alembic/               # Database migrations
+│   ├── src/pa_investing/
+│   │   ├── analytics/         # Valuation, snapshots, and performance calculations
+│   │   ├── api/               # FastAPI routes, schemas, and authentication
+│   │   ├── brokers/           # CSV and IBKR connectors
+│   │   ├── db/                # SQLAlchemy models and repositories
+│   │   ├── finance/           # Reusable finance skills and orchestration
+│   │   ├── instruments/       # Canonical references and provider resolution
+│   │   ├── market_data/       # Current quotes, FX, and historical-data routing
+│   │   ├── notion/            # Notion adapter and presentation mapping
+│   │   ├── scripts/           # Runnable command-line entry points
+│   │   └── workflows/         # Broker import, daily review, and refresh orchestration
+│   └── tests/                 # Unit and integration tests
+└── docs/                      # Design notes and implementation plans
+```
 
-### Phase 2: First MVP Loop
+## Quick Start
 
-Implemented:
+The backend requires Python 3.12 or newer. Run these commands from `backend/`:
 
-- live Notion client behind the existing interface
-- idempotent Notion upsert behavior using `External ID`
-- Notion sync targets:
-  - `Settings`
-  - `Accounts`
-  - `Positions`
-  - `Signals`
-  - `Daily Review`
-- Alpha Vantage market-data provider
-- Twelve Data mapped quote and FX provider
-- end-to-end refresh-and-sync workflow
-- `POST /workflows/refresh-and-sync`
-- demo portfolio seed flow
-- IBKR broker import scaffolding:
-  - Flex Web Service connector for secure scheduled NAS import
-  - Client Portal Gateway connector kept as a local/manual fallback
-  - shared import workflow that upserts broker accounts and positions
-- backend runbook for local MVP execution
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -e ".[dev]"
+cp .env.example .env
+alembic upgrade head
+```
 
-The demo seed flow includes:
+Safe local defaults keep Notion disabled and do not place trades:
 
-- one demo account: `pa-demo`
-- starter symbols:
-  - `SPGI`
-  - `ASML`
-  - `SAP`
-  - `SGLN`
-  - `SMH`
+```bash
+PA_NOTION_ENABLED=false
+PA_MARKET_DATA_PROVIDER=manual
+```
 
-### Phase 2: Performance History Slice
+Start the API:
 
-Implemented so far:
+```bash
+.venv/bin/uvicorn pa_investing.main:app --reload
+curl http://localhost:8000/health
+```
 
-- snapshot-based performance history service
-- ordered snapshot history reads from the repository layer
-- `GET /analysis/performance`
-- performance response schemas
-- simple browser auth helper and config
-- responsive performance-oriented portfolio analysis page shell
-- fixed snapshot cadence definition:
-  - `00:00`
-  - `06:00`
-  - `12:00`
-  - `18:00`
-- one-shot scheduled snapshot command that reuses the refresh API
-- successful refresh transactions commit before any Notion write
-- bearer-token protection for the refresh workflow trigger
-- performance-history and scheduling runbook
-- responsive position-allocation donut chart
-- responsive historical NAV line chart
-- one-snapshot-per-day performance series for daily return calculations
+Expected health response:
 
-Still pending in this slice:
+```json
+{"status":"ok"}
+```
 
-- entering the four command triggers in the uGREEN NAS scheduler
-- production NAS authentication and visual verification on the deployed URL
+For PostgreSQL and container deployment, use the
+[UGREEN DXP4800 Plus operating runbook](backend/README.md#ugreen-dxp4800-plus-deployment).
 
-### Phase 2: General Instrument Identity Slice
+## Normal Operating Workflow
 
-Implemented:
+### 1. Import the portfolio
 
-- stable internal instrument IDs for positions and historical prices
-- deterministic migration of all legacy symbol-keyed data
-- optional generic provider identifiers with uniqueness safeguards
-- IBKR Flex parsing for `conid`, ISIN, local symbol, and listing venue when available
-- Client Portal parsing for `conid` and venue when available
-- duplicate-symbol support across distinct venues
-- ambiguous symbol-only quote protection pending provider mapping in the FX/quote slice
-- internal-ID-based Notion position external IDs with legacy external-ID read compatibility
+For a real portfolio, configure `PA_IBKR_FLEX_TOKEN` and `PA_IBKR_FLEX_QUERY_ID`, then run:
 
-### Phase 2: Quotes, FX, and Reporting Currency Slice
+```bash
+.venv/bin/python -m pa_investing.scripts.import_ibkr_positions
+```
 
-Implemented:
+IBKR Flex is preferred for scheduled NAS use because it does not require an interactive session.
+The Client Portal Gateway remains available for local/manual testing. Neither connector submits
+orders.
 
-- provider-specific market-data mappings keyed by internal instrument ID
-- timestamped quote and FX history with provider and quality metadata
-- configurable Twelve Data adapter for mapped quotes and currency conversion
-- listing currency and exchange validation before a quote can replace a broker mark
-- persisted quote selection with IBKR EOD fallback
-- explicit price multipliers for provider units such as GBX to GBP
-- USD/GBP reporting values and coverage-aware aggregate calculations
-- stale and missing FX status in schema-flexible Notion payloads
-- CSV mapping importer and instrument-ID output in the position inspection command
+For a disposable local portfolio:
 
-Live Twelve Data validation is complete for the currently mapped portfolio. Unsupported listings
-continue to use their timestamped IBKR Flex marks and are labelled as fallbacks.
+```bash
+.venv/bin/python -m pa_investing.scripts.seed_demo_portfolio
+```
 
-### Historical Data Library
+### 2. Inspect identities and configure mappings
 
-The reusable daily-history layer lives under `pa_investing.market_data.history`. It is shared by
-the PA application, local scripts, and future agent or skill consumers.
+```bash
+.venv/bin/python -m pa_investing.scripts.show_positions
+.venv/bin/python -m pa_investing.scripts.import_market_data_mappings mappings.csv
+```
 
-Its current contract is deliberately narrow:
+A mapping connects one internal instrument to each provider representation:
 
-- daily bars only
-- provider order: Yahoo, then Twelve Data
-- one complete provider series per dataset; bars are never silently stitched
-- split-and-dividend-adjusted OHLC is the default analysis series
-- the least-adjusted provider series is retained when available
-- portfolio requests use internal instrument IDs and explicit provider mappings
-- research requests use candidate resolution and return ambiguity instead of guessing a listing
-- accepted datasets are immutable, versioned, persisted, and reused
-- analysis fails closed when all providers fail
-- stale data is returned only when the caller explicitly opts in
+```csv
+instrument_id,provider,provider_symbol,provider_exchange,expected_currency,price_multiplier,enabled
+your-smh-id,yahoo,SMH.L,,GBP,1,true
+your-smh-id,twelve_data,SMH,LSE,GBP,1,true
+```
 
-IBKR TWS/Gateway historical data is intentionally not part of this slice. It remains a separate,
-optional overlay so the NAS and research library do not depend on a logged-in IBKR session.
+Use `price_multiplier=0.01` when a provider returns GBX for an instrument stored in GBP.
 
-### Canonical Instrument References
+### 3. Smoke-test data and analysis
 
-User-facing instrument references use a compact Bloomberg-style convention while provider
-symbols remain internal mappings:
+Research mode accepts a readable canonical reference:
+
+```bash
+.venv/bin/python -m pa_investing.scripts.fetch_historical_data \
+  --research "ADBE US" \
+  --start 2025-07-15 \
+  --end 2026-07-15
+
+.venv/bin/python -m pa_investing.scripts.analyze_instrument \
+  --research "ADBE US" \
+  --as-of 2026-07-15
+```
+
+Portfolio mode uses the stable internal ID so there is no ambiguity:
+
+```bash
+.venv/bin/python -m pa_investing.scripts.analyze_instrument \
+  --instrument-id your-instrument-id \
+  --as-of 2026-07-15
+```
+
+### 4. Run the daily refresh
+
+Start the API, then trigger the authenticated workflow:
+
+```bash
+curl -X POST http://localhost:8000/workflows/refresh-and-sync \
+  -H "Authorization: Bearer $PA_WORKFLOW_API_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"stop_prices": {}}'
+```
+
+The workflow reads portfolio inputs, refreshes mapped prices and FX, commits the snapshot and
+signals, runs finance evidence for eligible holdings, and updates the Notion dashboard.
+
+For a scheduler or NAS task:
+
+```bash
+.venv/bin/python -m pa_investing.scripts.run_scheduled_snapshot
+```
+
+## Market Data and Instrument Routing
+
+User-facing references follow a compact Bloomberg-style convention:
 
 ```text
 ADBE US
@@ -203,17 +212,24 @@ GLEN LN
 SMH LN
 ```
 
-The first token is the display symbol and the second is a canonical market code. Search accepts
-case-insensitive input and normalizes aliases such as `U.S.` to `US`. An accepted candidate
-returns `canonical_reference` alongside its exact exchange, currency, and provider mappings.
-For example, `GLEN LN` may map to Yahoo `GLEN.L`, Twelve Data `GLEN` on `LSE`, and an IBKR
-contract identifier without exposing those provider-specific values to finance skills.
+The resolver translates these references into provider-specific symbols such as Yahoo suffixes,
+Twelve Data exchange pairs, or IBKR contract identifiers. Callers should not need to remember a
+different ticker for every provider.
 
-### Deterministic Finance Skills
+There are two deliberately different resolution modes:
 
-The reusable finance layer lives under `pa_investing.finance`. Skills consume an already
-validated, adjusted daily `HistoricalDataset`; they do not download data or create PA signals.
-The default bundle is:
+- **Portfolio:** requires an internal instrument ID and explicit mappings; ambiguity fails closed.
+- **Research:** searches candidates from a readable reference and returns ambiguity instead of
+  guessing a listing.
+
+Daily history defaults to Yahoo and falls back to Twelve Data only when the fallback can satisfy
+the complete requested window. Accepted datasets retain provider, listing, currency, adjustment,
+fetch time, warnings, and failed-attempt provenance. Adjusted OHLC is the default analysis series;
+the least-adjusted companion series is retained when available.
+
+## Using Finance Skills
+
+The finance layer is a reusable library under `pa_investing.finance`. Its default bundle is:
 
 ```text
 daily_market_review.v1
@@ -222,119 +238,106 @@ daily_market_review.v1
 └── market_risk_snapshot.v1
 ```
 
-`FinanceAnalysisService` supports both portfolio instruments and standalone research:
+Use the full bundle by omitting `--skill`, or run one or more skills independently by repeating
+the option:
+
+```bash
+.venv/bin/python -m pa_investing.scripts.analyze_instrument \
+  --research "ADBE US" \
+  --as-of 2026-07-15 \
+  --skill technical_snapshot.v1
+
+.venv/bin/python -m pa_investing.scripts.analyze_instrument \
+  --research "ADBE US" \
+  --as-of 2026-07-15 \
+  --skill technical_snapshot.v1 \
+  --skill market_risk_snapshot.v1
+```
+
+The default lookback is 365 calendar days. Override it with `--lookback-days`. Add
+`--allow-stale` only when a caller explicitly accepts the last validated dataset.
+
+Application code can use the same service for either purpose:
 
 ```python
-result = service.analyze_portfolio(
+portfolio_result = service.analyze_portfolio(
     instrument_id,
-    as_of=date.today(),
+    as_of=review_date,
+)
+
+research_result = service.analyze_research(
+    research_instrument,
+    as_of=review_date,
+    skill_ids=("technical_snapshot.v1",),
 )
 ```
 
-The standalone smoke-test command runs the same default bundle:
+Every result contains dataset provenance, per-skill status, metrics, findings, warnings, and a
+deterministic summary. Finance findings are supporting evidence in the daily review; they do not
+automatically become portfolio signals.
 
-```bash
-cd backend
-.venv/bin/python -m pa_investing.scripts.analyze_instrument \
-  --research "ADBE US" \
-  --as-of 2026-07-15
+## Adding a Finance Skill
+
+A price-history skill is intentionally a small, testable class:
+
+1. Add a module under `backend/src/pa_investing/finance/skills/`.
+2. Give it versioned `SkillMetadata`, for example `relative_strength.v1`.
+3. Implement `run(request, dataset) -> SkillResult` without network or database access.
+4. Add focused unit tests under `backend/tests/unit/`.
+5. Export it from `finance/skills/__init__.py` and register it in
+   `finance/defaults.py`.
+6. Add it to a bundle only if it belongs in that workflow's default review.
+
+Minimal shape:
+
+```python
+class RelativeStrengthSkill:
+    metadata = SkillMetadata(
+        skill_id="relative_strength.v1",
+        name="Relative strength",
+        description="Compares recent price performance with a benchmark.",
+        execution_mode=ExecutionMode.DETERMINISTIC,
+        min_bars=60,
+    )
+
+    def run(self, request, dataset) -> SkillResult:
+        # Pure calculation over an already validated dataset.
+        return SkillResult(
+            skill_id=self.metadata.skill_id,
+            status=SkillStatus.SUCCESS,
+            metrics={},
+            findings=[],
+        )
 ```
 
-The default lookback is 365 calendar days. Callers may select explicit skill IDs, override
-validated thresholds, or register additional deterministic or model-assisted skills through
-`SkillRegistry`. Skill failures are isolated and produce a partial analysis with structured
-warnings and a deterministic summary.
+Registration is explicit:
 
-## Code Structure
+```python
+registry.register(RelativeStrengthSkill())
+registry.register_bundle(
+    "daily_market_review.v2",
+    (
+        "technical_snapshot.v1",
+        "candlestick_events.v1",
+        "market_risk_snapshot.v1",
+        "relative_strength.v1",
+    ),
+)
+```
 
-The main application code lives in [backend/src/pa_investing](backend/src/pa_investing/).
+Keep independent skills independent. A new skill should not import the PA workflow, Notion, or a
+provider client. The service owns evidence retrieval; the orchestrator owns isolation and summary;
+the caller decides whether the result is used for research, a watchlist, or a portfolio review.
 
-High-level layout:
+### Future fundamental and news skills
 
-- `analytics/`
-  - pure analytics logic
-  - snapshot building
-  - performance-history calculations
-- `analytics_app/`
-  - browser-facing HTML page builders
-- `api/`
-  - FastAPI route handlers
-  - request and response schemas
-  - browser auth helper
-- `audit/`
-  - audit event domain objects
-- `brokers/`
-  - import interfaces
-  - CSV importer
-  - IBKR Flex Web Service connector
-  - optional IBKR Client Portal Gateway connector
-- `core/`
-  - settings
-  - dependency wiring
-- `db/`
-  - SQLAlchemy base
-  - ORM models
-  - repositories
-  - session factory
-- `domain/`
-  - central business models and enums
-- `llm/`
-  - mockable LLM abstraction and summarizer interface
-- `market_data/`
-  - market-data interface
-  - manual provider
-  - Alpha Vantage provider
-  - Twelve Data provider
-  - mapped quote selection
-  - persisted daily-history contracts, validation, routing, and providers
-- `instruments/`
-  - strict portfolio resolution
-  - standalone research candidate resolution
-- `notion/`
-  - client interfaces
-  - live Notion adapter
-  - payload mapping and sync logic
-- `scripts/`
-  - CLI entrypoints for demo portfolio seeding and scheduled snapshots
-- `seeds/`
-  - reusable seeding helpers
-- `signals/`
-  - signal rules and evaluation service
-- `sizing/`
-  - deterministic sizing models
-- `workflows/`
-  - daily review
-  - refresh-and-sync
-  - snapshot schedule definition
+Do not force fundamentals or news into `HistoricalDataset`. The current `FinanceSkill` protocol is
+correctly narrow for price-based analysis. When the first non-price skill is implemented, introduce
+a small analysis context containing optional, typed evidence such as price history, fundamentals,
+and news. Let each skill declare its required evidence and fail clearly when it is unavailable.
+Avoid a generic autonomous-agent framework until a real workflow needs one.
 
-## Backend Flow
-
-The current backend flow is roughly:
-
-1. read configured portfolio settings and manual cost overrides from Notion
-2. load reconciled positions from PostgreSQL
-3. refresh prices through a market-data provider
-4. update stored marks
-5. build a portfolio snapshot
-6. generate deterministic signals
-7. persist snapshots, signals, settings, and audit data
-8. sync accounts, positions, signals, and summary outputs to Notion
-9. expose deeper history through browser analytics endpoints
-
-## Broker Import Direction
-
-For IBKR, the preferred deployable path is Flex Web Service. It uses a token and query id
-created in IBKR Client Portal, does not require storing the IBKR username/password in this
-app, and fits a NAS scheduler. It is best for daily or intermittent position/account reads,
-not intraday trading workflows.
-
-The Client Portal Gateway connector remains in the codebase for local manual testing, but it
-is not the recommended NAS path because it depends on an interactive browser login and a
-short-lived session. The app still does not place trades.
-
-## Current API Surface
-
-Implemented routes:
+## API Surface
 
 - `GET /health`
 - `GET /analysis/portfolio`
@@ -348,83 +351,69 @@ Implemented routes:
 - `POST /analysis/market-data/research`
 - `POST /workflows/refresh-and-sync`
 
-## What Still Needs To Be Done For The First Real Notion MVP
+Analytics routes can be protected with HTTP Basic authentication. The write workflow uses a
+separate bearer token. See [backend/README.md](backend/README.md) for the complete environment and
+Notion schema configuration.
 
-The main missing step is no longer code structure. It is environment hookup:
+## Development
 
-1. configure a real `.env`
-2. connect real Notion databases
-3. run the seed command
-4. run the refresh workflow
-5. inspect the real Notion output
+Run the quality checks from `backend/`:
 
-For Compose or NAS deployment, set `PA_WORKFLOW_API_TOKEN` in `backend/.env`; scheduled
-snapshot commands read it from the environment and send it as a Bearer token. Compose keeps
-analytics auth enabled by default. Blank enabled analytics credentials or a missing workflow
-token in a non-test environment return a service-configuration error rather than opening an
-endpoint. PostgreSQL is private to the Compose network and the backend binds to loopback by
-default; remote browser access should use the NAS HTTPS reverse proxy or a trusted VPN. The
-full setup and scheduler commands are in the [backend runbook](backend/README.md).
+```bash
+.venv/bin/python -m pytest
+.venv/bin/ruff check .
+```
 
-For real IBKR position import, configure `PA_IBKR_FLEX_TOKEN` and
-`PA_IBKR_FLEX_QUERY_ID`. The existing import command auto-selects Flex when those values are
-present and otherwise falls back to the local Gateway connector.
+Tests use SQLite in memory by default. Live-provider tests should remain opt-in and must not be
+required for the deterministic unit suite.
 
-Imported positions now retain broker cost provenance. A manual average-cost override, including
-an explicit zero for a genuinely free share, survives later broker imports. Positions without a
-reliable cost basis display `unavailable` and are excluded from reliable P&L. The user-facing
-Notion `Cost Override` field is part of the next implementation slice.
+When changing the system:
 
-IBKR Flex imports now also persist a provider-neutral trade ledger and a same-report NAV/cash
-reconciliation. Repeated imports update the same external trade IDs rather than duplicating them.
-Provider runs record IBKR import, market-data refresh, and enabled Notion sync status for the
-authenticated operations endpoint.
+- put calculations in pure domain/analytics/finance code;
+- keep provider behavior behind an interface;
+- validate and persist provenance at ingestion boundaries;
+- make external writes idempotent;
+- isolate failures by provider, instrument, and skill;
+- add a migration for persisted schema changes;
+- prefer an explicit registry or dependency over dynamic magic.
 
-## What Still Needs To Be Done For The Next MVP Slice
+## Recommended Next Step
 
-For the performance-history slice, the main next steps are:
+The next milestone should be a **production daily-review reliability pass**, not another agent.
+Treat the NAS deployment as accepted only after seven consecutive successful 06:00
+Europe/London morning cycles.
 
-1. improve the browser performance view from a responsive shell into a richer charting surface
-2. verify the richer view at both computer and smartphone browser widths
-3. configure the four fixed task times on the uGREEN NAS
+1. Run the real IBKR → prices/FX → finance evidence → Notion workflow daily for one to two weeks.
+2. Surface one run summary from the existing provider-run records, showing provider success,
+   finance coverage, stale/missing data, and Notion synchronization status in one place.
+3. Replace weekday-only history coverage expectations with exchange-aware trading calendars so
+   normal market holidays do not appear as missing-session warnings.
+4. Reconcile calculated NAV and cash with the IBKR report and make performance cash-flow-aware.
+5. Only then add the first new evidence family—preferably fundamentals—using the typed analysis
+   context described above.
 
-## Important Boundaries
+This sequence tests the whole personal-assistant loop with real data before increasing analytical
+breadth. News sentiment can follow fundamentals once source provenance, timestamps, and failure
+behavior are defined.
 
-The project keeps these boundaries on purpose:
+## Known Limitations
 
-- Notion is a UI adapter, not the source of truth
-- PostgreSQL remains the structured source of truth
-- secrets stay in backend config, never in Notion
-- deterministic backend rules own numeric recommendations
-- the system remains read-only and analysis-only
-- browser analytics auth is separate from backend-to-Notion integration
+- Performance returns and drawdown are not yet adjusted for cash flows.
+- Historical coverage currently uses weekday expectations rather than exchange calendars, so
+  holidays can produce harmless warnings.
+- Daily finance analysis supports equities and ETFs with daily bars only.
+- The default finance loop analyzes eligible holdings sequentially; large portfolios may need
+  bounded concurrency later.
+- Yahoo is convenient but unofficial and may change behavior; Twelve Data requires mappings and
+  an API key.
+- IBKR Flex is suitable for scheduled snapshots, not continuous real-time connectivity.
+- Notion is eventually consistent with PostgreSQL and may fail after the core transaction commits.
 
-## Key Files
+## Further Documentation
 
-Good starting points if you want to orient yourself quickly:
-
-- top-level project status: [README.md](README.md)
-- backend runbook: [backend/README.md](backend/README.md)
-- app entrypoint: [backend/src/pa_investing/main.py](backend/src/pa_investing/main.py)
-- route layer: [backend/src/pa_investing/api/routes.py](backend/src/pa_investing/api/routes.py)
-- dependency wiring: [backend/src/pa_investing/core/dependencies.py](backend/src/pa_investing/core/dependencies.py)
-- refresh workflow: [backend/src/pa_investing/workflows/refresh_and_sync.py](backend/src/pa_investing/workflows/refresh_and_sync.py)
-- performance history logic: [backend/src/pa_investing/analytics/performance.py](backend/src/pa_investing/analytics/performance.py)
-- demo seed CLI: [backend/src/pa_investing/scripts/seed_demo_portfolio.py](backend/src/pa_investing/scripts/seed_demo_portfolio.py)
-- IBKR import CLI: [backend/src/pa_investing/scripts/import_ibkr_positions.py](backend/src/pa_investing/scripts/import_ibkr_positions.py)
-- scheduled snapshot CLI: [backend/src/pa_investing/scripts/run_scheduled_snapshot.py](backend/src/pa_investing/scripts/run_scheduled_snapshot.py)
-
-## Related Documents
-
-- architecture design:
-  [2026-07-07-pa-investing-system-architecture-design.md](docs/superpowers/specs/2026-07-07-pa-investing-system-architecture-design.md)
-- MVP roadmap pivot:
-  [2026-07-08-pa-investing-mvp-roadmap-pivot-design.md](docs/superpowers/specs/2026-07-08-pa-investing-mvp-roadmap-pivot-design.md)
-- demo seed design:
-  [2026-07-10-pa-investing-demo-seed-portfolio-design.md](docs/superpowers/specs/2026-07-10-pa-investing-demo-seed-portfolio-design.md)
-- demo seed plan:
-  [2026-07-10-pa-investing-demo-seed-portfolio-plan.md](docs/superpowers/plans/2026-07-10-pa-investing-demo-seed-portfolio-plan.md)
-- performance history design:
-  [2026-07-10-pa-investing-performance-history-mvp-design.md](docs/superpowers/specs/2026-07-10-pa-investing-performance-history-mvp-design.md)
-- performance history plan:
-  [2026-07-10-pa-investing-performance-history-mvp-plan.md](docs/superpowers/plans/2026-07-10-pa-investing-performance-history-mvp-plan.md)
+- [Backend setup and operating runbook](backend/README.md)
+- [System architecture design](docs/superpowers/specs/2026-07-07-pa-investing-system-architecture-design.md)
+- [External Vibe Trading review](docs/superpowers/specs/2026-07-10-pa-investing-external-inspiration-note.md)
+- [Finance skills and canonical references plan](docs/superpowers/plans/2026-07-16-finance-skills-and-canonical-references.md)
+- [Historical-data routing plan](docs/superpowers/plans/2026-07-16-finance-library-historical-data-routing.md)
+- [Daily review and Notion plan](docs/superpowers/plans/2026-07-16-daily-review-finance-notion.md)
