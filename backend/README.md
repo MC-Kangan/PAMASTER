@@ -507,12 +507,16 @@ The canonical NAS project location is:
 ```
 
 Keep the API bound to `127.0.0.1:8000` during the Notion-first MVP. Do not configure router port
-forwarding. Private browser/PWA access is a separate deployment slice.
+forwarding, a public reverse proxy, or Tailscale Funnel. Private browser/PWA access is a separate
+deployment slice. PostgreSQL must remain private to the Compose network: never publish host port
+`5432`.
 
 ### Initial Installation
 
-Create and protect `.env` with the first three commands below. Before running
-`docker compose config --quiet`, set these values in `.env`:
+Create and protect `backend/.env` with the first three commands below. This ignored file is the
+only location for production secrets: never commit a secret or place one in another file, a
+command, a scheduler definition, Notion, or Git. Before running `docker compose config --quiet`,
+set these values in `backend/.env`:
 
 ```text
 PA_POSTGRES_PASSWORD
@@ -578,7 +582,8 @@ Expected evidence:
 ### UGOS Task Schedule
 
 Configure each UGOS scheduled task to run as the NAS account that can execute Docker Compose.
-Retain scheduler output in the UGOS task logs.
+Retain scheduler output in the UGOS task logs. Do not add a scheduler service to Compose or run a
+separate scheduler container; UGOS Task Scheduler invokes these one-shot commands directly.
 
 **06:00 Europe/London — full morning cycle:**
 
@@ -600,6 +605,9 @@ cd /volume1/docker/pa-investing/backend && docker compose exec -T backend-api py
 ```bash
 /volume1/docker/pa-investing/backend/scripts/backup_postgres.sh
 ```
+
+The backup script validates every dump with `pg_restore --list` before it can be retained. Retain
+only validated dumps; it keeps validated dumps for 30 days, then prunes older dump files.
 
 The snapshot command calls the authenticated refresh-and-sync workflow over container loopback.
 It exits non-zero when the workflow token is absent or the request fails, and prints the snapshot
