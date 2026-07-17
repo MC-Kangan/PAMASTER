@@ -493,38 +493,171 @@ References:
 - [MDN HTTP authentication](https://developer.mozilla.org/en-US/docs/Web/HTTP/Guides/Authentication)
 - [OWASP Authentication Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/Authentication_Cheat_Sheet.html)
 
-## Scheduled Snapshots
+## UGREEN DXP4800 Plus Deployment
 
-The application defines four local deployment times:
+Deploy this application with UGOS Pro Docker Compose, not a virtual machine. The workload has two
+Linux services, no kernel-specific dependency, and no requirement for a guest desktop or separate
+operating system. Docker preserves NAS memory, uses the existing image definitions, and keeps
+PostgreSQL storage and application restarts explicit.
 
-- `00:00`
-- `06:00`
-- `12:00`
-- `18:00`
+The canonical NAS project location is:
 
-The application does not run a second scheduler process. Configure the uGREEN NAS task
-scheduler, cron, or another host scheduler to invoke this one-shot command at each time:
-
-```bash
-docker compose exec -T backend-api python -m pa_investing.scripts.run_scheduled_snapshot
+```text
+/volume1/docker/pa-investing
 ```
 
-Run that command from the directory containing `backend/docker-compose.yml`. It calls the
-existing refresh-and-sync API over container loopback and uses an empty stop-price map. This
-creates a regular portfolio snapshot without duplicating the workflow logic. Compose forwards
-`PA_WORKFLOW_API_TOKEN` from `.env`, and the command reads it from the container environment.
+Keep the API bound to `127.0.0.1:8000` during the Notion-first MVP. Do not configure router port
+forwarding, a public reverse proxy, or Tailscale Funnel. Private browser/PWA access is a separate
+deployment slice. PostgreSQL must remain private to the Compose network: never publish host port
+`5432`.
 
-For a backend running at another address, use:
+### Initial Installation
 
-```bash
-export PA_WORKFLOW_API_TOKEN=generate_a_long_random_token
-python -m pa_investing.scripts.run_scheduled_snapshot \
-  --base-url http://localhost:8000
+Create and protect `backend/.env` with the first three commands below. This ignored file is the
+only location for production secrets: never commit a secret or place one in another file, a
+command, a scheduler definition, Notion, or Git. Before running `docker compose config --quiet`,
+set these values in `backend/.env`:
+
+```text
+PA_POSTGRES_PASSWORD
+PA_NOTION_ENABLED=true
+PA_NOTION_API_KEY
+PA_NOTION_SETTINGS_DATABASE_ID
+PA_NOTION_ACCOUNTS_DATABASE_ID
+PA_NOTION_POSITIONS_DATABASE_ID
+PA_NOTION_SIGNALS_DATABASE_ID
+PA_NOTION_DAILY_REVIEW_DATABASE_ID
+PA_MARKET_DATA_PROVIDER=twelve_data
+PA_TWELVE_DATA_API_KEY
+PA_IBKR_FLEX_TOKEN
+PA_IBKR_FLEX_QUERY_ID
+PA_ANALYTICS_AUTH_ENABLED=true
+PA_ANALYTICS_AUTH_USERNAME
+PA_ANALYTICS_AUTH_PASSWORD
+PA_WORKFLOW_API_TOKEN
+PA_DEFAULT_BASE_CURRENCY
+PA_BIND_ADDRESS=127.0.0.1
 ```
 
-The command has no token command-line option, so the secret does not appear in process
-listings. It exits non-zero when the token is absent or an HTTP request fails, and prints the
-snapshot ID after success, making its output suitable for NAS scheduler logs.
+Use distinct URL-safe secrets for `PA_POSTGRES_PASSWORD`, analytics authentication, and
+`PA_WORKFLOW_API_TOKEN`; do not reuse those credentials with Notion, IBKR, or Twelve Data.
+
+```bash
+cd /volume1/docker/pa-investing/backend
+cp .env.example .env
+chmod 600 .env
+docker compose config --quiet
+docker compose build --pull
+docker compose run --rm backend-api alembic upgrade head
+docker compose up -d
+docker compose ps
+curl --fail http://127.0.0.1:8000/health
+```
+
+### Manual End-to-End Smoke Test
+
+After the API health check succeeds, run the full production path manually:
+
+```bash
+cd /volume1/docker/pa-investing/backend
+
+docker compose exec -T backend-api \
+  python -m pa_investing.scripts.import_ibkr_positions --source flex
+
+docker compose exec -T backend-api \
+  python -m pa_investing.scripts.run_scheduled_snapshot
+
+docker compose exec -T backend-api \
+  python -m pa_investing.scripts.show_positions
+```
+
+Expected evidence:
+
+- The IBKR command reports imported accounts, positions, transactions, and reconciliation status.
+- The snapshot command prints a new snapshot ID.
+- `show_positions` displays the real internal instrument IDs.
+- Notion shows a Daily Review for the current Europe/London date.
+- Position `Price As Of`, `FX As Of`, reporting value, and portfolio weight are populated.
+
+### UGOS Task Schedule
+
+Before configuring these tasks, verify in UGOS that the system timezone is set to
+`Europe/London`. This keeps the local cadence aligned with UK daylight-saving time instead of
+shifting the jobs by an hour when the clocks change.
+
+Configure each UGOS scheduled task to run as the NAS account that can execute Docker Compose.
+Retain scheduler output in the UGOS task logs. Do not add a scheduler service to Compose or run a
+separate scheduler container; UGOS Task Scheduler invokes these one-shot commands directly.
+
+**06:00 Europe/London — full morning cycle:**
+
+```bash
+cd /volume1/docker/pa-investing/backend && docker compose exec -T backend-api python -m pa_investing.scripts.import_ibkr_positions --source flex && docker compose exec -T backend-api python -m pa_investing.scripts.run_scheduled_snapshot
+```
+
+The morning command intentionally uses `&&`: a failed IBKR import prevents the refresh from being
+reported as a successful full cycle.
+
+**12:00, 18:00, and 00:00 Europe/London — snapshot refresh:**
+
+```bash
+cd /volume1/docker/pa-investing/backend && docker compose exec -T backend-api python -m pa_investing.scripts.run_scheduled_snapshot
+```
+
+**02:30 Europe/London — database backup:**
+
+```bash
+/volume1/docker/pa-investing/backend/scripts/backup_postgres.sh
+```
+
+The backup script writes a private temporary file in `backups/`, validates it with
+`pg_restore --list`, and atomically publishes the validated archive as a private `.dump` file.
+Publication never replaces an existing same-second dump. Only after publication succeeds does the
+script prune published dump files older than 30 days; failed dumps and failed validations are
+cleaned up without running retention.
+
+The snapshot command calls the authenticated refresh-and-sync workflow over container loopback.
+It exits non-zero when the workflow token is absent or the request fails, and prints the snapshot
+ID after success, so its output is suitable for the retained task logs.
+
+### Backup Validation and Restore Drill
+
+Run this drill after the initial real refresh and periodically thereafter:
+
+```bash
+cd /volume1/docker/pa-investing/backend
+scripts/backup_postgres.sh
+latest=$(ls -1t backups/pa_investing-*.dump | head -1)
+docker compose exec -T postgres createdb -U pa_investing pa_investing_restore_test
+docker compose exec -T postgres pg_restore -U pa_investing -d pa_investing_restore_test < "$latest"
+docker compose exec -T postgres psql -U pa_investing -d pa_investing_restore_test -c 'SELECT count(*) FROM portfolio_snapshots;'
+docker compose exec -T postgres dropdb -U pa_investing pa_investing_restore_test
+```
+
+The `latest` glob selects only atomically published, validated `.dump` files; in-progress temporary
+files are hidden and are removed automatically on failure.
+
+Expected: the restore completes, the snapshot count is non-zero after the first real refresh, and
+the temporary database is removed.
+
+### Update and Rollback
+
+For each application update:
+
+```bash
+cd /volume1/docker/pa-investing/backend
+scripts/backup_postgres.sh
+git pull --ff-only
+docker compose build --pull
+docker compose run --rm backend-api alembic upgrade head
+docker compose up -d
+docker compose ps
+curl --fail http://127.0.0.1:8000/health
+```
+
+Application rollback means checking out the previously deployed commit and rebuilding the backend
+image. Database rollback must use the pre-update dump; never run an Alembic downgrade against the
+only production database without a tested restore.
 
 ## Docker
 
