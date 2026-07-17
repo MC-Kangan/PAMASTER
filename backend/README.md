@@ -581,6 +581,10 @@ Expected evidence:
 
 ### UGOS Task Schedule
 
+Before configuring these tasks, verify in UGOS that the system timezone is set to
+`Europe/London`. This keeps the local cadence aligned with UK daylight-saving time instead of
+shifting the jobs by an hour when the clocks change.
+
 Configure each UGOS scheduled task to run as the NAS account that can execute Docker Compose.
 Retain scheduler output in the UGOS task logs. Do not add a scheduler service to Compose or run a
 separate scheduler container; UGOS Task Scheduler invokes these one-shot commands directly.
@@ -606,8 +610,11 @@ cd /volume1/docker/pa-investing/backend && docker compose exec -T backend-api py
 /volume1/docker/pa-investing/backend/scripts/backup_postgres.sh
 ```
 
-The backup script validates every dump with `pg_restore --list` before it can be retained. Retain
-only validated dumps; it keeps validated dumps for 30 days, then prunes older dump files.
+The backup script writes a private temporary file in `backups/`, validates it with
+`pg_restore --list`, and atomically publishes the validated archive as a private `.dump` file.
+Publication never replaces an existing same-second dump. Only after publication succeeds does the
+script prune published dump files older than 30 days; failed dumps and failed validations are
+cleaned up without running retention.
 
 The snapshot command calls the authenticated refresh-and-sync workflow over container loopback.
 It exits non-zero when the workflow token is absent or the request fails, and prints the snapshot
@@ -626,6 +633,9 @@ docker compose exec -T postgres pg_restore -U pa_investing -d pa_investing_resto
 docker compose exec -T postgres psql -U pa_investing -d pa_investing_restore_test -c 'SELECT count(*) FROM portfolio_snapshots;'
 docker compose exec -T postgres dropdb -U pa_investing pa_investing_restore_test
 ```
+
+The `latest` glob selects only atomically published, validated `.dump` files; in-progress temporary
+files are hidden and are removed automatically on failure.
 
 Expected: the restore completes, the snapshot count is non-zero after the first real refresh, and
 the temporary database is removed.

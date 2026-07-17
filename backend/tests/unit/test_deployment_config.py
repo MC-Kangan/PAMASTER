@@ -73,3 +73,21 @@ def test_backup_script_dumps_validates_then_applies_retention() -> None:
     retention_index = script.index("-mtime +30 -delete")
     assert dump_index < validation_index < retention_index
     assert "set -eu" in script
+
+
+def test_runbook_requires_europe_london_system_timezone_before_schedule_setup() -> None:
+    runbook = (BACKEND_ROOT / "README.md").read_text()
+    schedule = runbook.split("### UGOS Task Schedule", maxsplit=1)[1].split(
+        "### Backup Validation and Restore Drill", maxsplit=1
+    )[0]
+    normalized_schedule = " ".join(schedule.split())
+
+    timezone_instruction = (
+        "Before configuring these tasks, verify in UGOS that the system timezone is set to "
+        "`Europe/London`."
+    )
+    assert timezone_instruction in normalized_schedule
+    assert normalized_schedule.index(timezone_instruction) < normalized_schedule.index(
+        "Configure each UGOS scheduled task"
+    )
+    assert "UK daylight-saving time" in normalized_schedule
