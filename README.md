@@ -358,13 +358,10 @@ The main missing step is no longer code structure. It is environment hookup:
 4. run the refresh workflow
 5. inspect the real Notion output
 
-For Compose or NAS deployment, set `PA_WORKFLOW_API_TOKEN` in `backend/.env`; scheduled
-snapshot commands read it from the environment and send it as a Bearer token. Compose keeps
-analytics auth enabled by default. Blank enabled analytics credentials or a missing workflow
-token in a non-test environment return a service-configuration error rather than opening an
-endpoint. PostgreSQL is private to the Compose network and the backend binds to loopback by
-default; remote browser access should use the NAS HTTPS reverse proxy or a trusted VPN. The
-full setup and scheduler commands are in the [backend runbook](backend/README.md).
+For the UGREEN NAS deployment, follow the canonical
+[UGREEN DXP4800 Plus operating runbook](backend/README.md#ugreen-dxp4800-plus-deployment).
+The next app-layer milestone begins only after seven consecutive successful 06:00 Europe/London
+morning cycles.
 
 For real IBKR position import, configure `PA_IBKR_FLEX_TOKEN` and
 `PA_IBKR_FLEX_QUERY_ID`. The existing import command auto-selects Flex when those values are
