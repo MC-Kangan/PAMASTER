@@ -53,3 +53,23 @@ def test_docker_build_context_excludes_secrets_and_runtime_data() -> None:
     assert "backups/" in ignored_paths
     assert "*.db" in ignored_paths
     assert "__pycache__/" in ignored_paths
+
+
+def test_postgres_backups_are_ignored_by_git() -> None:
+    ignored_paths = {
+        line.strip()
+        for line in (REPOSITORY_ROOT / ".gitignore").read_text().splitlines()
+        if line.strip() and not line.lstrip().startswith("#")
+    }
+
+    assert "backend/backups/" in ignored_paths
+
+
+def test_backup_script_dumps_validates_then_applies_retention() -> None:
+    script = (BACKEND_ROOT / "scripts" / "backup_postgres.sh").read_text()
+
+    dump_index = script.index("pg_dump")
+    validation_index = script.index("pg_restore --list")
+    retention_index = script.index("-mtime +30 -delete")
+    assert dump_index < validation_index < retention_index
+    assert "set -eu" in script
