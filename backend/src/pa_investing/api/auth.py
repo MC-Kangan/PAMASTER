@@ -1,7 +1,7 @@
 from secrets import compare_digest
 from typing import Annotated
 
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, Header, HTTPException, status
 from fastapi.security import (
     HTTPAuthorizationCredentials,
     HTTPBasic,
@@ -88,3 +88,27 @@ def require_workflow_auth(
         detail="Invalid workflow credentials",
         headers={"WWW-Authenticate": "Bearer"},
     )
+
+
+def require_browser_refresh_request(
+    request_marker: Annotated[
+        str | None,
+        Header(alias="X-PA-Request"),
+    ] = None,
+    content_type: Annotated[
+        str | None,
+        Header(alias="Content-Type"),
+    ] = None,
+) -> None:
+    if request_marker is None or not compare_digest(request_marker, "refresh"):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Browser refresh request marker is missing or invalid",
+        )
+
+    media_type = (content_type or "").partition(";")[0].strip().lower()
+    if media_type != "application/json":
+        raise HTTPException(
+            status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+            detail="Browser refresh requires application/json",
+        )

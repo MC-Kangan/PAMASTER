@@ -410,7 +410,8 @@ def portfolio_page() -> str:
               <section class="chart-panel calendar" aria-labelledby="calendar-heading">
                 <h2 id="calendar-heading">Indicative P&amp;L Calendar</h2>
                 <p class="chart-note">
-                  Cash flows are not adjusted; values compare available daily snapshots.
+                  Indicative values compare available daily snapshots and are not adjusted for
+                  cash flows, trades, dividends, fees, or taxes.
                 </p>
                 <div id="pnl-calendar" aria-live="polite">
                   <div class="chart-note">Loading indicative daily P&amp;L...</div>
@@ -503,20 +504,21 @@ def portfolio_page() -> str:
               day: 'numeric',
             }).format(localDate);
             const coverage = Number(point.reporting_coverage);
+            const exactCoverage = String(point.reporting_coverage);
             const coverageLabel = Number.isNaN(coverage)
-              ? String(point.reporting_coverage)
-              : `${(coverage * 100).toFixed(1)}%`;
+              ? exactCoverage
+              : `${(coverage * 100).toFixed(0)}%`;
             const amountLabel = amount === null
               ? '--'
               : formatCurrency(point.pnl_amount, currency);
-            const tooltip = `Date: ${point.calendar_date}; reporting coverage: ${coverageLabel}`;
+            const tooltip = `Date: ${point.calendar_date}; reporting coverage: ${exactCoverage}`;
             return `
               <time class="calendar-cell ${tone}" datetime="${point.calendar_date}" tabindex="0"
                    title="${escapeHtml(tooltip)}"
                    aria-label="${escapeHtml(`${tooltip}; P&L: ${amountLabel}`)}">
                 <span class="calendar-date">${escapeHtml(dateLabel)}</span>
                 <span class="calendar-pnl">${escapeHtml(amountLabel)}</span>
-                <span class="calendar-coverage">Coverage: ${escapeHtml(coverageLabel)}</span>
+                <span class="calendar-coverage">${escapeHtml(coverageLabel)}</span>
               </time>
             `;
           }
@@ -576,25 +578,40 @@ def portfolio_page() -> str:
             button.setAttribute('aria-busy', 'true');
             status.textContent = 'Refreshing portfolio...';
             try {
-              const response = await fetch('/analysis/refresh', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({}),
-              });
-              if (!response.ok) {
-                let detail = `Request failed (${response.status})`;
-                try {
-                  const payload = await response.json();
-                  detail = payload.detail || detail;
-                } catch (_) {
-                  // Keep the HTTP status message when the response is not JSON.
+              try {
+                const response = await fetch('/analysis/refresh', {
+                  method: 'POST',
+                  headers: {
+                    'Content-Type': 'application/json',
+                    'X-PA-Request': 'refresh',
+                  },
+                  body: JSON.stringify({}),
+                });
+                if (!response.ok) {
+                  let detail = `Request failed (${response.status})`;
+                  try {
+                    const payload = await response.json();
+                    detail = payload.detail || detail;
+                  } catch (_) {
+                    // Keep the HTTP status message when the response is not JSON.
+                  }
+                  throw new Error(detail);
                 }
-                throw new Error(detail);
+              } catch (error) {
+                status.textContent = `Refresh failed: ${error.message}`;
+                return;
               }
-              await Promise.all([loadCurrentPortfolio(), loadPerformance(), loadDailyPnl()]);
-              status.textContent = 'Portfolio refreshed.';
-            } catch (error) {
-              status.textContent = `Refresh failed: ${error.message}`;
+
+              const reloadResults = await Promise.allSettled([
+                loadCurrentPortfolio(),
+                loadPerformance(),
+                loadDailyPnl(),
+              ]);
+              if (reloadResults.some((result) => result.status === 'rejected')) {
+                status.textContent = 'Portfolio refreshed, but some panels failed to reload.';
+              } else {
+                status.textContent = 'Portfolio refreshed.';
+              }
             } finally {
               button.disabled = false;
               button.removeAttribute('aria-busy');

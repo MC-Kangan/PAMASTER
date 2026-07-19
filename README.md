@@ -33,8 +33,8 @@ The repository has a working end-to-end MVP rather than only scaffolding.
 | Trade execution | Intentionally not implemented |
 
 The current analytics are useful for daily monitoring, but returns and drawdown are not yet
-cash-flow-aware. Treat them as indicative until deposits, withdrawals, dividends, fees, and broker
-NAV reconciliation are fully incorporated into performance calculations.
+adjusted for cash flows, trades, dividends, fees, or taxes. Treat them as indicative until those
+effects and broker NAV reconciliation are fully incorporated into performance calculations.
 
 ## Architecture
 
@@ -343,17 +343,22 @@ Avoid a generic autonomous-agent framework until a real workflow needs one.
 - `GET /analysis/portfolio`
 - `GET /analysis/signal/{signal_id}`
 - `GET /analysis/performance`
+- `GET /analysis/daily-pnl?days=90`
 - `GET /analysis/current`
 - `GET /analysis/transactions`
 - `GET /analysis/operations`
 - `GET /analysis/instruments/search?q={query}`
 - `GET /analysis/market-data/{instrument_id}?start=YYYY-MM-DD&end=YYYY-MM-DD`
 - `POST /analysis/market-data/research`
+- `POST /analysis/refresh`
 - `POST /workflows/refresh-and-sync`
 
-Analytics routes can be protected with HTTP Basic authentication. The write workflow uses a
-separate bearer token. See [backend/README.md](backend/README.md) for the complete environment and
-Notion schema configuration.
+Analytics routes use HTTP Basic authentication when it is enabled. The browser-facing
+`POST /analysis/refresh` additionally requires its CSRF request marker and JSON content type;
+analytics authentication must be enabled whenever that browser refresh endpoint is exposed.
+`POST /workflows/refresh-and-sync` remains independently protected by its Bearer token. See
+[backend/README.md](backend/README.md) for the complete security, environment, and Notion schema
+configuration.
 
 ## Development
 
@@ -398,7 +403,8 @@ behavior are defined.
 
 ## Known Limitations
 
-- Performance returns and drawdown are not yet adjusted for cash flows.
+- Performance returns and drawdown are not yet adjusted for cash flows, trades, dividends, fees,
+  or taxes.
 - Historical coverage currently uses weekday expectations rather than exchange calendars, so
   holidays can produce harmless warnings.
 - Daily finance analysis supports equities and ETFs with daily bars only.

@@ -48,6 +48,7 @@ from pa_investing.workflows.agent_api import DailyReviewResult
 
 class FakeRefreshAndSyncWorkflow:
     def __init__(self, expected_stop_prices: dict[str, Decimal] | None = None) -> None:
+        self.call_count = 0
         self.expected_stop_prices = (
             {"AAPL": Decimal("180")}
             if expected_stop_prices is None
@@ -55,6 +56,7 @@ class FakeRefreshAndSyncWorkflow:
         )
 
     def run(self, stop_prices: dict[str, Decimal]) -> DailyReviewResult:
+        self.call_count += 1
         assert stop_prices == self.expected_stop_prices
         return DailyReviewResult(
             snapshot=PortfolioSnapshot(
@@ -555,19 +557,94 @@ def test_browser_refresh_route_returns_refresh_and_sync_summary() -> None:
     app.dependency_overrides[get_settings] = lambda: Settings(
         analytics_auth_enabled=False,
     )
-    app.dependency_overrides[get_refresh_and_sync_workflow] = (
-        lambda: FakeRefreshAndSyncWorkflow(expected_stop_prices={})
+    workflow = FakeRefreshAndSyncWorkflow(expected_stop_prices={})
+    app.dependency_overrides[get_refresh_and_sync_workflow] = lambda: workflow
+
+    response = TestClient(app).post(
+        "/analysis/refresh",
+        json={},
+        headers={"X-PA-Request": "refresh"},
     )
 
-    response = TestClient(app).post("/analysis/refresh", json={})
-
     assert response.status_code == 200
+    assert workflow.call_count == 1
     assert response.json() == {
         "snapshot_id": "snap-123",
         "nav": "1750",
         "signal_count": 1,
         "notion_sync_enabled": False,
     }
+
+
+def test_browser_refresh_route_rejects_missing_request_marker_without_running_workflow() -> None:
+    app = create_app()
+    app.dependency_overrides[get_settings] = lambda: Settings(
+        analytics_auth_enabled=False,
+    )
+    workflow = FakeRefreshAndSyncWorkflow(expected_stop_prices={})
+    app.dependency_overrides[get_refresh_and_sync_workflow] = lambda: workflow
+
+    response = TestClient(app).post("/analysis/refresh", json={})
+
+    assert response.status_code == 403
+    assert workflow.call_count == 0
+
+
+def test_browser_refresh_route_rejects_wrong_request_marker_without_running_workflow() -> None:
+    app = create_app()
+    app.dependency_overrides[get_settings] = lambda: Settings(
+        analytics_auth_enabled=False,
+    )
+    workflow = FakeRefreshAndSyncWorkflow(expected_stop_prices={})
+    app.dependency_overrides[get_refresh_and_sync_workflow] = lambda: workflow
+
+    response = TestClient(app).post(
+        "/analysis/refresh",
+        json={},
+        headers={"X-PA-Request": "other"},
+    )
+
+    assert response.status_code == 403
+    assert workflow.call_count == 0
+
+
+def test_browser_refresh_route_rejects_form_content_type_without_running_workflow() -> None:
+    app = create_app()
+    app.dependency_overrides[get_settings] = lambda: Settings(
+        analytics_auth_enabled=False,
+    )
+    workflow = FakeRefreshAndSyncWorkflow(expected_stop_prices={})
+    app.dependency_overrides[get_refresh_and_sync_workflow] = lambda: workflow
+
+    response = TestClient(app).post(
+        "/analysis/refresh",
+        data={"refresh": "true"},
+        headers={"X-PA-Request": "refresh"},
+    )
+
+    assert response.status_code == 415
+    assert workflow.call_count == 0
+
+
+def test_browser_refresh_route_rejects_foreign_origin_form_without_running_workflow() -> None:
+    app = create_app()
+    app.dependency_overrides[get_settings] = lambda: Settings(
+        analytics_auth_enabled=True,
+        analytics_auth_username="demo",
+        analytics_auth_password="secret",
+    )
+    workflow = FakeRefreshAndSyncWorkflow(expected_stop_prices={})
+    app.dependency_overrides[get_refresh_and_sync_workflow] = lambda: workflow
+
+    response = TestClient(app).post(
+        "/analysis/refresh",
+        data={"refresh": "true"},
+        headers={"Origin": "https://foreign.example"},
+        auth=("demo", "secret"),
+    )
+
+    assert response.status_code == 403
+    assert workflow.call_count == 0
 
 
 def test_browser_refresh_route_rejects_missing_analytics_credentials() -> None:
@@ -655,6 +732,10 @@ def test_performance_analysis_page_renders() -> None:
     assert "Indicative P&amp;L" in response.text
     assert "fetch('/analysis/daily-pnl?days=90')" in response.text
     assert "fetch('/analysis/refresh'" in response.text
+    assert "'X-PA-Request': 'refresh'" in response.text
+    assert "Promise.allSettled" in response.text
+    assert "Portfolio refreshed, but some panels failed to reload." in response.text
+    assert "cash flows, trades, dividends, fees, or taxes" in response.text
     assert 'role="grid"' not in response.text
     assert 'role="columnheader"' not in response.text
     assert 'role="gridcell"' not in response.text
@@ -663,9 +744,10 @@ def test_performance_analysis_page_renders() -> None:
         'tabindex="0"' in response.text
     )
     assert (
-        '<span class="calendar-coverage">Coverage: '
+        '<span class="calendar-coverage">'
         "${escapeHtml(coverageLabel)}</span>" in response.text
     )
+    assert "reporting coverage: ${exactCoverage}" in response.text
     script = response.text.split("<script>", maxsplit=1)[1].split(
         "</script>", maxsplit=1
     )[0]

@@ -13,7 +13,11 @@ from pa_investing.analytics.performance import (
 from pa_investing.analytics.snapshots import build_portfolio_snapshot
 from pa_investing.analytics.valuation import apply_reporting_currency
 from pa_investing.analytics_app.pages import portfolio_page, signal_page
-from pa_investing.api.auth import require_analytics_auth, require_workflow_auth
+from pa_investing.api.auth import (
+    require_analytics_auth,
+    require_browser_refresh_request,
+    require_workflow_auth,
+)
 from pa_investing.api.schemas import (
     CurrentHoldingResponse,
     CurrentPortfolioResponse,
@@ -360,6 +364,7 @@ def refresh_and_sync_route(
 @router.post("/analysis/refresh", response_model=RefreshAndSyncResponse)
 def browser_refresh_route(
     _: Annotated[None, Depends(require_analytics_auth)],
+    _browser_request: Annotated[None, Depends(require_browser_refresh_request)],
     workflow: Annotated[
         RefreshAndSyncWorkflow,
         Depends(get_refresh_and_sync_workflow),

@@ -13,9 +13,9 @@ The system is analysis-only. It does not place trades.
 
 The backend now converts mapped USD, EUR, and GBP positions into the configured USD or GBP
 reporting currency. Missing FX excludes a position from aggregate reporting totals and lowers
-the visible coverage ratio; stale persisted FX remains usable but is marked stale. Cash balances,
-cash flows, and transaction-aware return calculations are not implemented, so the current
-portfolio total is invested value rather than complete broker NAV.
+the visible coverage ratio; stale persisted FX remains usable but is marked stale. Cash balances
+are not implemented, and performance is not adjusted for cash flows, trades, dividends, fees, or
+taxes, so the current portfolio total is invested value rather than complete broker NAV.
 
 ## Implemented So Far
 
@@ -408,8 +408,8 @@ POST /analysis/refresh
 ```
 
 Daily P&L is indicative because it compares the latest available NAV snapshot for each calendar
-day and does not adjust for deposits, withdrawals, or other external cash flows. The reporting
-coverage value shows how much of the portfolio had reporting-currency values in each snapshot.
+day and does not adjust for cash flows, trades, dividends, fees, or taxes. The reporting coverage
+value shows how much of the portfolio had reporting-currency values in each snapshot.
 Browser-initiated refresh runs the same refresh-and-sync workflow as the scheduled workflow, so
 enabled Notion synchronization continues to run before the page reloads its current holdings,
 performance history, and daily P&L data.
@@ -450,13 +450,23 @@ belong on this browser surface and can be linked from Notion.
 
 ## Secure Browser Deployment
 
-All `/analysis/*` routes use an application authentication dependency. With authentication enabled:
+All `/analysis/*` routes use the HTTP Basic application-authentication dependency. Analytics
+authentication must be enabled whenever the browser refresh endpoint is exposed. With
+authentication enabled:
 
 - missing or incorrect credentials return `401`;
 - blank configured credentials return `503`, leaving the application closed;
 - credential comparison uses constant-time comparison;
-- the write-capable refresh endpoint remains separately protected by
-  `PA_WORKFLOW_API_TOKEN`.
+- browser-facing `POST /analysis/refresh` also requires `Content-Type: application/json` and the
+  exact non-simple request header `X-PA-Request: refresh`;
+- workflow-facing `POST /workflows/refresh-and-sync` remains independently protected by the
+  `PA_WORKFLOW_API_TOKEN` Bearer token and is unchanged.
+
+The custom request header and the application's absence of CORS permission form the CSRF boundary
+for `/analysis/refresh`: a cross-site form cannot supply the marker, and a cross-origin script
+cannot send it without a successful preflight. Do not add permissive CORS handling for this route.
+This design deliberately does not compare `Origin`, `Host`, or absolute URLs, so it remains valid
+behind a correctly configured reverse proxy.
 
 The current application login uses HTTP Basic authentication. Basic authentication is suitable for
 this single-user MVP only when it is transported over HTTPS and the application is not directly
