@@ -1,4 +1,4 @@
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 
 from sqlalchemy import create_engine
@@ -8,6 +8,7 @@ from pa_investing.analytics.performance import (
     build_performance_history,
     latest_snapshot_per_day,
 )
+from pa_investing.analytics.daily_pnl import build_indicative_daily_pnl
 from pa_investing.db.base import Base
 from pa_investing.db.repositories import PortfolioSnapshotRepository
 from pa_investing.domain.models import PortfolioSnapshot
@@ -79,6 +80,57 @@ def test_build_performance_history_handles_empty_history() -> None:
     assert history.ending_nav is None
     assert history.simple_return is None
     assert history.max_drawdown is None
+
+
+def test_indicative_daily_pnl_uses_latest_snapshot_and_previous_available_day() -> None:
+    result = build_indicative_daily_pnl(
+        [
+            _snapshot("day-1-morning", "2026-07-10T06:00:00+00:00", "1000", "0"),
+            _snapshot("day-1-close", "2026-07-10T18:00:00+00:00", "1020", "20"),
+            _snapshot("day-2", "2026-07-11T12:00:00+00:00", "1050", "50"),
+        ]
+    )
+
+    assert result.reporting_currency == "USD"
+    assert result.latest_nav == Decimal("1050")
+    assert result.dtd_pnl_amount == Decimal("30")
+    assert result.dtd_pnl_percent == Decimal("30") / Decimal("1020")
+    assert [point.pnl_amount for point in result.points] == [None, Decimal("30")]
+    assert result.points[1].comparison_date == date(2026, 7, 10)
+    assert result.indicative is True
+
+
+def test_indicative_daily_pnl_handles_empty_history() -> None:
+    result = build_indicative_daily_pnl([])
+
+    assert result.reporting_currency is None
+    assert result.latest_nav is None
+    assert result.dtd_pnl_amount is None
+    assert result.dtd_pnl_percent is None
+    assert result.points == []
+
+
+def test_indicative_daily_pnl_handles_zero_prior_nav_and_propagates_coverage() -> None:
+    first = _snapshot("zero", "2026-07-10T18:00:00+00:00", "0", "0")
+    second = _snapshot("valued", "2026-07-11T18:00:00+00:00", "100", "100")
+    second.reporting_coverage = Decimal("0.8")
+
+    result = build_indicative_daily_pnl([first, second])
+
+    assert result.points[1].pnl_amount == Decimal("100")
+    assert result.points[1].pnl_percent is None
+    assert result.points[1].reporting_coverage == Decimal("0.8")
+
+
+def test_indicative_daily_pnl_uses_most_recent_reporting_currency() -> None:
+    gbp = _snapshot("gbp", "2026-07-10T18:00:00+00:00", "800", "0")
+    gbp.base_currency = "GBP"
+    usd = _snapshot("usd", "2026-07-11T18:00:00+00:00", "1000", "0")
+
+    result = build_indicative_daily_pnl([gbp, usd])
+
+    assert result.reporting_currency == "USD"
+    assert [point.ending_nav for point in result.points] == [Decimal("1000")]
 
 
 def test_portfolio_snapshot_repository_lists_history_in_time_order() -> None:
