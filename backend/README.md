@@ -400,6 +400,20 @@ The current holdings and allocation endpoint is:
 GET /analysis/current
 ```
 
+The indicative daily P&L history and browser refresh endpoints are:
+
+```text
+GET /analysis/daily-pnl?days=90
+POST /analysis/refresh
+```
+
+Daily P&L is indicative because it compares the latest available NAV snapshot for each calendar
+day and does not adjust for deposits, withdrawals, or other external cash flows. The reporting
+coverage value shows how much of the portfolio had reporting-currency values in each snapshot.
+Browser-initiated refresh runs the same refresh-and-sync workflow as the scheduled workflow, so
+enabled Notion synchronization continues to run before the page reloads its current holdings,
+performance history, and daily P&L data.
+
 The provider-neutral transaction ledger and operational status endpoints are:
 
 ```text
@@ -424,10 +438,11 @@ Open the browser analytics page at:
 http://localhost:8000/analysis/portfolio
 ```
 
-The browser surface is intended for both computer and smartphone browsers. It renders a current
-position-allocation donut, a historical NAV line chart, and the daily performance table. Headline
-returns use the latest snapshot from each calendar day so the four intraday scheduled snapshots do
-not create artificial daily-return observations.
+The browser surface is intended for both computer and smartphone browsers. It renders headline
+NAV and indicative daily P&L cards, a daily P&L calendar, a current position-allocation donut, a
+historical NAV line chart, and the daily performance table. Headline returns use the latest
+snapshot from each calendar day so the four intraday scheduled snapshots do not create artificial
+daily-return observations.
 
 The Notion free plan permits only one native chart for the workspace and the available chart slot
 is already consumed. Notion remains the compact operating dashboard; richer and interactive charts

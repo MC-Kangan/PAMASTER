@@ -51,15 +51,89 @@ def portfolio_page() -> str:
           main {
             max-width: 1100px;
             margin: 0 auto;
-            padding: 24px 16px 48px;
+            padding: 16px 12px 48px;
           }
           h1, h2, p {
             margin: 0;
           }
+          .top-nav {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            margin-bottom: 24px;
+            border-bottom: 1px solid #dbe4f0;
+          }
+          .tab {
+            color: #1d4ed8;
+            border-bottom: 3px solid #2563eb;
+            padding: 10px 4px 9px;
+            font-weight: 600;
+            text-decoration: none;
+          }
+          .refresh-controls {
+            display: flex;
+            align-items: center;
+            justify-content: flex-end;
+            gap: 10px;
+            min-width: 0;
+          }
+          .refresh-status {
+            color: #475569;
+            font-size: 13px;
+            overflow-wrap: anywhere;
+          }
+          button {
+            min-height: 40px;
+            border: 1px solid #1d4ed8;
+            border-radius: 6px;
+            background: #2563eb;
+            color: #ffffff;
+            cursor: pointer;
+            font: inherit;
+            font-weight: 600;
+            padding: 8px 14px;
+          }
+          button:hover:not(:disabled) {
+            background: #1d4ed8;
+          }
+          button:focus-visible,
+          .tab:focus-visible {
+            outline: 3px solid #93c5fd;
+            outline-offset: 2px;
+          }
+          button:disabled {
+            cursor: wait;
+            opacity: 0.65;
+          }
           .intro {
             display: grid;
             gap: 8px;
-            margin-bottom: 24px;
+            margin-bottom: 16px;
+          }
+          .kpi-grid {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 10px;
+            margin-bottom: 16px;
+          }
+          .kpi-card {
+            background: #ffffff;
+            border: 1px solid #dbe4f0;
+            border-radius: 8px;
+            min-width: 0;
+            padding: 14px;
+          }
+          .kpi-label {
+            color: #4b5563;
+            font-size: 13px;
+            margin-bottom: 6px;
+          }
+          .kpi-value {
+            font-size: clamp(20px, 5vw, 28px);
+            font-variant-numeric: tabular-nums;
+            font-weight: 650;
+            overflow-wrap: anywhere;
           }
           .summary-grid {
             display: grid;
@@ -88,6 +162,60 @@ def portfolio_page() -> str:
           .chart-panel {
             display: grid;
             gap: 12px;
+          }
+          .calendar {
+            display: grid;
+            gap: 6px;
+          }
+          .calendar-grid {
+            display: grid;
+            grid-template-columns: repeat(7, minmax(0, 1fr));
+            gap: 4px;
+          }
+          .calendar-weekday {
+            color: #64748b;
+            font-size: 11px;
+            font-weight: 600;
+            padding: 4px 0;
+            text-align: center;
+          }
+          .calendar-cell,
+          .calendar-spacer {
+            min-height: 58px;
+            border-radius: 6px;
+          }
+          .calendar-cell {
+            display: grid;
+            align-content: space-between;
+            gap: 4px;
+            border: 1px solid #dbe4f0;
+            padding: 7px 5px;
+            font-variant-numeric: tabular-nums;
+            overflow: hidden;
+          }
+          .calendar-date {
+            font-size: 10px;
+            color: #475569;
+            white-space: nowrap;
+          }
+          .calendar-pnl {
+            font-size: 12px;
+            font-weight: 650;
+            overflow-wrap: anywhere;
+          }
+          .pnl-positive {
+            background: #ecfdf5;
+            border-color: #86efac;
+            color: #166534;
+          }
+          .pnl-negative {
+            background: #fef2f2;
+            border-color: #fca5a5;
+            color: #991b1b;
+          }
+          .pnl-flat {
+            background: #f8fafc;
+            color: #475569;
           }
           .chart-grid {
             display: grid;
@@ -178,6 +306,20 @@ def portfolio_page() -> str:
             color: #4b5563;
           }
           @media (max-width: 640px) {
+            .top-nav {
+              align-items: flex-start;
+            }
+            .refresh-controls {
+              align-items: flex-end;
+              flex-direction: column-reverse;
+            }
+            .calendar-cell,
+            .calendar-spacer {
+              min-height: 50px;
+            }
+            .calendar-date {
+              font-size: 9px;
+            }
             .donut-layout {
               grid-template-columns: 1fr;
             }
@@ -186,13 +328,49 @@ def portfolio_page() -> str:
               justify-self: center;
             }
           }
+          @media (min-width: 720px) {
+            main {
+              padding: 24px 16px 48px;
+            }
+            .kpi-grid {
+              grid-template-columns: repeat(4, minmax(0, 1fr));
+              gap: 12px;
+            }
+          }
         </style>
       </head>
       <body>
         <main>
+              <nav class="top-nav" aria-label="Portfolio sections">
+                <a class="tab" id="portfolio-tab" href="/analysis/portfolio"
+                   aria-current="page">Portfolio</a>
+                <div class="refresh-controls">
+                  <span class="refresh-status" id="refresh-status"
+                        aria-live="polite"></span>
+                  <button id="refresh-portfolio" type="button">Refresh</button>
+                </div>
+              </nav>
               <section class="intro">
                 <h1>Portfolio Analysis</h1>
-                <p>Performance History</p>
+                <p>Indicative P&amp;L, allocation, and performance history</p>
+              </section>
+              <section class="kpi-grid" aria-label="Portfolio summary">
+                <article class="kpi-card">
+                  <div class="kpi-label">NAV</div>
+                  <div class="kpi-value" id="latest-nav">--</div>
+                </article>
+                <article class="kpi-card">
+                  <div class="kpi-label">Indicative DTD P&amp;L</div>
+                  <div class="kpi-value" id="dtd-pnl-amount">--</div>
+                </article>
+                <article class="kpi-card">
+                  <div class="kpi-label">Indicative DTD return</div>
+                  <div class="kpi-value" id="dtd-pnl-percent">--</div>
+                </article>
+                <article class="kpi-card">
+                  <div class="kpi-label">Reporting coverage</div>
+                  <div class="kpi-value" id="reporting-coverage">--</div>
+                </article>
               </section>
               <section class="summary-grid">
             __SUMMARY_CARDS__
@@ -215,6 +393,15 @@ def portfolio_page() -> str:
                     <div class="chart-note">Loading performance history...</div>
                   </div>
                 </article>
+              </section>
+              <section class="chart-panel calendar" aria-labelledby="calendar-heading">
+                <h2 id="calendar-heading">Indicative P&amp;L Calendar</h2>
+                <p class="chart-note">
+                  Cash flows are not adjusted; values compare available daily snapshots.
+                </p>
+                <div id="pnl-calendar" aria-live="polite">
+                  <div class="chart-note">Loading indicative daily P&amp;L...</div>
+                </div>
               </section>
               <section class="chart-panel" id="performance-history">
                 <h2>Performance History</h2>
@@ -272,6 +459,134 @@ def portfolio_page() -> str:
               }).format(numeric);
             }
             return value;
+          }
+
+          function formatCurrency(value, currency) {
+            if (value === null || value === undefined) {
+              return '--';
+            }
+            const numeric = Number(value);
+            if (Number.isNaN(numeric)) {
+              return value;
+            }
+            if (currency) {
+              return new Intl.NumberFormat(undefined, {
+                style: 'currency',
+                currency,
+                maximumFractionDigits: 2,
+              }).format(numeric);
+            }
+            return formatValue(numeric, 'currency');
+          }
+
+          function calendarCell(point, currency) {
+            const amount = point.pnl_amount === null ? null : Number(point.pnl_amount);
+            const tone = amount === null || amount === 0
+              ? 'pnl-flat'
+              : amount > 0 ? 'pnl-positive' : 'pnl-negative';
+            const localDate = new Date(`${point.calendar_date}T00:00:00`);
+            const dateLabel = new Intl.DateTimeFormat(undefined, {
+              month: 'short',
+              day: 'numeric',
+            }).format(localDate);
+            const coverage = Number(point.reporting_coverage);
+            const coverageLabel = Number.isNaN(coverage)
+              ? String(point.reporting_coverage)
+              : `${(coverage * 100).toFixed(1)}%`;
+            const amountLabel = amount === null
+              ? '--'
+              : formatCurrency(point.pnl_amount, currency);
+            const tooltip = `Date: ${point.calendar_date}; reporting coverage: ${coverageLabel}`;
+            return `
+              <div class="calendar-cell ${tone}" role="gridcell"
+                   title="${escapeHtml(tooltip)}"
+                   aria-label="${escapeHtml(`${tooltip}; P&L: ${amountLabel}`)}">
+                <span class="calendar-date">${escapeHtml(dateLabel)}</span>
+                <span class="calendar-pnl">${escapeHtml(amountLabel)}</span>
+              </div>
+            `;
+          }
+
+          async function loadDailyPnl() {
+            const response = await fetch('/analysis/daily-pnl?days=90');
+            if (!response.ok) {
+              throw new Error(`Daily P&amp;L request failed (${response.status})`);
+            }
+            const payload = await response.json();
+            document.getElementById('latest-nav').textContent =
+              formatCurrency(payload.latest_nav, payload.reporting_currency);
+            document.getElementById('dtd-pnl-amount').textContent =
+              formatCurrency(payload.dtd_pnl_amount, payload.reporting_currency);
+            document.getElementById('dtd-pnl-percent').textContent =
+              formatValue(payload.dtd_pnl_percent, 'percent');
+
+            const latestPoint = payload.points[payload.points.length - 1];
+            document.getElementById('reporting-coverage').textContent = latestPoint
+              ? formatValue(latestPoint.reporting_coverage, 'percent')
+              : '--';
+
+            const calendar = document.getElementById('pnl-calendar');
+            if (!payload.points.length) {
+              calendar.innerHTML = '<div class="chart-note">No daily P&amp;L available.</div>';
+              return;
+            }
+            const firstDate = new Date(`${payload.points[0].calendar_date}T00:00:00`);
+            const mondayOffset = (firstDate.getDay() + 6) % 7;
+            const spacers = '<div class="calendar-spacer" aria-hidden="true"></div>'
+              .repeat(mondayOffset);
+            const weekdays = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
+              .map((day) => (
+                `<div class="calendar-weekday" role="columnheader">${day}</div>`
+              ))
+              .join('');
+            let previousDay = null;
+            const cells = payload.points.map((point) => {
+              const day = Date.parse(`${point.calendar_date}T00:00:00Z`);
+              const missingDays = previousDay === null
+                ? 0
+                : Math.max(0, Math.round((day - previousDay) / 86400000) - 1);
+              previousDay = day;
+              const gaps = '<div class="calendar-spacer" aria-hidden="true"></div>'
+                .repeat(missingDays);
+              return `${gaps}${calendarCell(point, payload.reporting_currency)}`;
+            }).join('');
+            calendar.innerHTML = `
+              <div class="calendar-grid" role="grid" aria-label="Daily indicative P&amp;L">
+                ${weekdays}${spacers}${cells}
+              </div>
+            `;
+          }
+
+          async function refreshPortfolio() {
+            const button = document.getElementById('refresh-portfolio');
+            const status = document.getElementById('refresh-status');
+            button.disabled = true;
+            button.setAttribute('aria-busy', 'true');
+            status.textContent = 'Refreshing portfolio...';
+            try {
+              const response = await fetch('/analysis/refresh', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({}),
+              });
+              if (!response.ok) {
+                let detail = `Request failed (${response.status})`;
+                try {
+                  const payload = await response.json();
+                  detail = payload.detail || detail;
+                } catch (_) {
+                  // Keep the HTTP status message when the response is not JSON.
+                }
+                throw new Error(detail);
+              }
+              await Promise.all([loadCurrentPortfolio(), loadPerformance(), loadDailyPnl()]);
+              status.textContent = 'Portfolio refreshed.';
+            } catch (error) {
+              status.textContent = `Refresh failed: ${error.message}`;
+            } finally {
+              button.disabled = false;
+              button.removeAttribute('aria-busy');
+            }
           }
 
           async function loadPerformance() {
@@ -394,6 +709,12 @@ def portfolio_page() -> str:
             document.getElementById('allocation-legend').innerHTML =
               '<div class="chart-note">Allocation unavailable.</div>';
           });
+          loadDailyPnl().catch(() => {
+            document.getElementById('pnl-calendar').innerHTML =
+              '<div class="chart-note">Indicative daily P&amp;L unavailable.</div>';
+          });
+          document.getElementById('refresh-portfolio')
+            .addEventListener('click', refreshPortfolio);
         </script>
       </body>
     </html>

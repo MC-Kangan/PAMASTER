@@ -647,6 +647,14 @@ def test_performance_analysis_page_renders() -> None:
     assert 'id="performance-history"' in response.text
     assert 'id="performance-body"' in response.text
     assert "overflow-wrap: anywhere;" in response.text
+    assert 'id="portfolio-tab"' in response.text
+    assert 'id="refresh-portfolio"' in response.text
+    assert 'id="dtd-pnl-amount"' in response.text
+    assert 'id="dtd-pnl-percent"' in response.text
+    assert 'id="pnl-calendar"' in response.text
+    assert "Indicative P&amp;L" in response.text
+    assert "fetch('/analysis/daily-pnl?days=90')" in response.text
+    assert "fetch('/analysis/refresh'" in response.text
 
 
 def test_operations_and_transactions_routes_return_operational_data() -> None:

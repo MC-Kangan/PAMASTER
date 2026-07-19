@@ -4,11 +4,11 @@ from decimal import Decimal
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
+from pa_investing.analytics.daily_pnl import build_indicative_daily_pnl
 from pa_investing.analytics.performance import (
     build_performance_history,
     latest_snapshot_per_day,
 )
-from pa_investing.analytics.daily_pnl import build_indicative_daily_pnl
 from pa_investing.db.base import Base
 from pa_investing.db.repositories import PortfolioSnapshotRepository
 from pa_investing.domain.models import PortfolioSnapshot
