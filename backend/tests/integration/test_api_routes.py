@@ -47,8 +47,15 @@ from pa_investing.workflows.agent_api import DailyReviewResult
 
 
 class FakeRefreshAndSyncWorkflow:
+    def __init__(self, expected_stop_prices: dict[str, Decimal] | None = None) -> None:
+        self.expected_stop_prices = (
+            {"AAPL": Decimal("180")}
+            if expected_stop_prices is None
+            else expected_stop_prices
+        )
+
     def run(self, stop_prices: dict[str, Decimal]) -> DailyReviewResult:
-        assert stop_prices == {"AAPL": Decimal("180")}
+        assert stop_prices == self.expected_stop_prices
         return DailyReviewResult(
             snapshot=PortfolioSnapshot(
                 snapshot_id="snap-123",
@@ -466,6 +473,118 @@ def test_performance_route_returns_empty_series_when_no_history_exists() -> None
         "max_drawdown": None,
         "points": [],
     }
+
+
+def test_indicative_daily_pnl_route_returns_summary_and_points() -> None:
+    app = create_app()
+    app.dependency_overrides[get_settings] = lambda: Settings(
+        analytics_auth_enabled=False,
+    )
+
+    class FakePortfolioSnapshotRepository:
+        def list_history(self, days: int | None = None) -> list[PortfolioSnapshot]:
+            assert days == 90
+            return [
+                PortfolioSnapshot(
+                    snapshot_id="snap-1",
+                    observed_at=datetime(2026, 7, 9, 16, tzinfo=UTC),
+                    base_currency="USD",
+                    nav=Decimal("1000"),
+                    gross_exposure=Decimal("1000"),
+                    net_exposure=Decimal("1000"),
+                    unrealized_pnl=Decimal("0"),
+                ),
+                PortfolioSnapshot(
+                    snapshot_id="snap-2",
+                    observed_at=datetime(2026, 7, 10, 16, tzinfo=UTC),
+                    base_currency="USD",
+                    nav=Decimal("1050"),
+                    gross_exposure=Decimal("1050"),
+                    net_exposure=Decimal("1050"),
+                    unrealized_pnl=Decimal("50"),
+                ),
+            ]
+
+    from pa_investing.core.dependencies import get_portfolio_snapshot_repository
+
+    app.dependency_overrides[get_portfolio_snapshot_repository] = (
+        lambda: FakePortfolioSnapshotRepository()
+    )
+    response = TestClient(app).get("/analysis/daily-pnl?days=90")
+
+    assert response.status_code == 200
+    assert response.json()["dtd_pnl_amount"] == "50"
+    assert response.json()["dtd_pnl_percent"] == "0.05"
+    assert response.json()["points"][0]["pnl_amount"] is None
+    assert response.json()["points"][1]["calendar_date"] == "2026-07-10"
+    assert response.json()["indicative"] is True
+
+
+def test_indicative_daily_pnl_route_returns_empty_series_when_no_history_exists() -> None:
+    app = create_app()
+    app.dependency_overrides[get_settings] = lambda: Settings(
+        analytics_auth_enabled=False,
+    )
+
+    class FakePortfolioSnapshotRepository:
+        def list_history(self, days: int | None = None) -> list[PortfolioSnapshot]:
+            assert days == 90
+            return []
+
+    from pa_investing.core.dependencies import get_portfolio_snapshot_repository
+
+    app.dependency_overrides[get_portfolio_snapshot_repository] = (
+        lambda: FakePortfolioSnapshotRepository()
+    )
+    response = TestClient(app).get("/analysis/daily-pnl?days=90")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "reporting_currency": None,
+        "latest_nav": None,
+        "latest_observed_at": None,
+        "dtd_pnl_amount": None,
+        "dtd_pnl_percent": None,
+        "indicative": True,
+        "points": [],
+    }
+
+
+def test_browser_refresh_route_returns_refresh_and_sync_summary() -> None:
+    app = create_app()
+    app.dependency_overrides[get_settings] = lambda: Settings(
+        analytics_auth_enabled=False,
+    )
+    app.dependency_overrides[get_refresh_and_sync_workflow] = (
+        lambda: FakeRefreshAndSyncWorkflow(expected_stop_prices={})
+    )
+
+    response = TestClient(app).post("/analysis/refresh", json={})
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "snapshot_id": "snap-123",
+        "nav": "1750",
+        "signal_count": 1,
+        "notion_sync_enabled": False,
+    }
+
+
+def test_browser_refresh_route_rejects_missing_analytics_credentials() -> None:
+    app = create_app()
+    app.dependency_overrides[get_settings] = lambda: Settings(
+        analytics_auth_enabled=True,
+        analytics_auth_username="demo",
+        analytics_auth_password="secret",
+    )
+    app.dependency_overrides[get_refresh_and_sync_workflow] = (
+        lambda: FakeRefreshAndSyncWorkflow(expected_stop_prices={})
+    )
+
+    response = TestClient(app).post("/analysis/refresh", json={})
+
+    assert response.status_code == 401
+    assert response.headers["www-authenticate"] == "Basic"
 
 
 def test_browser_analytics_route_denies_unauthenticated_requests() -> None:

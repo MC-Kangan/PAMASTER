@@ -36,6 +36,26 @@ class PerformanceHistoryResponse(BaseModel):
     points: list[PerformancePointResponse]
 
 
+class IndicativeDailyPnlPointResponse(BaseModel):
+    calendar_date: date
+    observed_at: datetime
+    comparison_date: date | None
+    ending_nav: str
+    pnl_amount: str | None
+    pnl_percent: str | None
+    reporting_coverage: str
+
+
+class IndicativeDailyPnlResponse(BaseModel):
+    reporting_currency: str | None
+    latest_nav: str | None
+    latest_observed_at: datetime | None
+    dtd_pnl_amount: str | None
+    dtd_pnl_percent: str | None
+    indicative: bool
+    points: list[IndicativeDailyPnlPointResponse]
+
+
 class CurrentHoldingResponse(BaseModel):
     symbol: str
     asset_class: str

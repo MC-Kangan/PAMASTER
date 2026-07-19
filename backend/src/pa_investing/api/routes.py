@@ -5,6 +5,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import HTMLResponse
 
+from pa_investing.analytics.daily_pnl import build_indicative_daily_pnl
 from pa_investing.analytics.performance import (
     build_performance_history,
     latest_snapshot_per_day,
@@ -17,6 +18,8 @@ from pa_investing.api.schemas import (
     CurrentHoldingResponse,
     CurrentPortfolioResponse,
     HistoricalResearchRequest,
+    IndicativeDailyPnlPointResponse,
+    IndicativeDailyPnlResponse,
     OperationsResponse,
     PerformanceHistoryResponse,
     PerformancePointResponse,
@@ -48,6 +51,7 @@ from pa_investing.market_data.history.router import HistoricalDataUnavailable
 from pa_investing.market_data.history.service import HistoricalDataService
 from pa_investing.notion.sync import PORTFOLIO_BASE_CURRENCY_KEY
 from pa_investing.presentation.fields import serialize_decimal
+from pa_investing.workflows.agent_api import DailyReviewResult
 from pa_investing.workflows.refresh_and_sync import RefreshAndSyncWorkflow
 
 router = APIRouter()
@@ -175,6 +179,36 @@ def performance_analysis(
     )
 
 
+@router.get("/analysis/daily-pnl", response_model=IndicativeDailyPnlResponse)
+def indicative_daily_pnl_analysis(
+    repository: Annotated[
+        PortfolioSnapshotRepository,
+        Depends(get_portfolio_snapshot_repository),
+    ],
+    _: Annotated[None, Depends(require_analytics_auth)],
+    days: int | None = 90,
+) -> IndicativeDailyPnlResponse:
+    history = build_indicative_daily_pnl(repository.list_history(days=days))
+    return IndicativeDailyPnlResponse(
+        reporting_currency=history.reporting_currency,
+        latest_nav=_format_decimal_or_none(history.latest_nav),
+        latest_observed_at=history.latest_observed_at,
+        dtd_pnl_amount=_format_decimal_or_none(history.dtd_pnl_amount),
+        dtd_pnl_percent=_format_decimal_or_none(history.dtd_pnl_percent),
+        indicative=history.indicative,
+        points=[
+            IndicativeDailyPnlPointResponse(
+                calendar_date=point.calendar_date,
+                observed_at=point.observed_at,
+                comparison_date=point.comparison_date,
+                ending_nav=_format_decimal(point.ending_nav),
+                pnl_amount=_format_decimal_or_none(point.pnl_amount),
+                pnl_percent=_format_decimal_or_none(point.pnl_percent),
+                reporting_coverage=_format_decimal(point.reporting_coverage),
+            )
+            for point in history.points
+        ],
+    )
 @router.get("/analysis/current", response_model=CurrentPortfolioResponse)
 def current_portfolio_analysis(
     context: Annotated[
@@ -320,6 +354,25 @@ def refresh_and_sync_route(
     settings: Annotated[Settings, Depends(get_settings)],
 ) -> RefreshAndSyncResponse:
     result = workflow.run(stop_prices=payload.stop_prices)
+    return _refresh_response(result, settings)
+
+
+@router.post("/analysis/refresh", response_model=RefreshAndSyncResponse)
+def browser_refresh_route(
+    _: Annotated[None, Depends(require_analytics_auth)],
+    workflow: Annotated[
+        RefreshAndSyncWorkflow,
+        Depends(get_refresh_and_sync_workflow),
+    ],
+    settings: Annotated[Settings, Depends(get_settings)],
+) -> RefreshAndSyncResponse:
+    return _refresh_response(workflow.run(stop_prices={}), settings)
+
+
+def _refresh_response(
+    result: DailyReviewResult,
+    settings: Settings,
+) -> RefreshAndSyncResponse:
     return RefreshAndSyncResponse(
         snapshot_id=result.snapshot.snapshot_id,
         nav=_format_decimal(result.snapshot.nav),
