@@ -655,6 +655,21 @@ def test_performance_analysis_page_renders() -> None:
     assert "Indicative P&amp;L" in response.text
     assert "fetch('/analysis/daily-pnl?days=90')" in response.text
     assert "fetch('/analysis/refresh'" in response.text
+    assert 'role="grid"' not in response.text
+    assert 'role="columnheader"' not in response.text
+    assert 'role="gridcell"' not in response.text
+    assert (
+        '<time class="calendar-cell ${tone}" datetime="${point.calendar_date}" '
+        'tabindex="0"' in response.text
+    )
+    assert (
+        '<span class="calendar-coverage">Coverage: '
+        "${escapeHtml(coverageLabel)}</span>" in response.text
+    )
+    script = response.text.split("<script>", maxsplit=1)[1].split(
+        "</script>", maxsplit=1
+    )[0]
+    assert "P&amp;L" not in script
 
 
 def test_operations_and_transactions_routes_return_operational_data() -> None:

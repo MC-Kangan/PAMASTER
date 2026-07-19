@@ -190,8 +190,15 @@ def portfolio_page() -> str:
             gap: 4px;
             border: 1px solid #dbe4f0;
             padding: 7px 5px;
+            text-decoration: none;
             font-variant-numeric: tabular-nums;
             overflow: hidden;
+          }
+          .calendar-cell:focus-visible {
+            outline: 3px solid #2563eb;
+            outline-offset: 2px;
+            position: relative;
+            z-index: 1;
           }
           .calendar-date {
             font-size: 10px;
@@ -202,6 +209,12 @@ def portfolio_page() -> str:
             font-size: 12px;
             font-weight: 650;
             overflow-wrap: anywhere;
+          }
+          .calendar-coverage {
+            color: #475569;
+            font-size: 9px;
+            line-height: 1.2;
+            white-space: nowrap;
           }
           .pnl-positive {
             background: #ecfdf5;
@@ -498,19 +511,20 @@ def portfolio_page() -> str:
               : formatCurrency(point.pnl_amount, currency);
             const tooltip = `Date: ${point.calendar_date}; reporting coverage: ${coverageLabel}`;
             return `
-              <div class="calendar-cell ${tone}" role="gridcell"
+              <time class="calendar-cell ${tone}" datetime="${point.calendar_date}" tabindex="0"
                    title="${escapeHtml(tooltip)}"
                    aria-label="${escapeHtml(`${tooltip}; P&L: ${amountLabel}`)}">
                 <span class="calendar-date">${escapeHtml(dateLabel)}</span>
                 <span class="calendar-pnl">${escapeHtml(amountLabel)}</span>
-              </div>
+                <span class="calendar-coverage">Coverage: ${escapeHtml(coverageLabel)}</span>
+              </time>
             `;
           }
 
           async function loadDailyPnl() {
             const response = await fetch('/analysis/daily-pnl?days=90');
             if (!response.ok) {
-              throw new Error(`Daily P&amp;L request failed (${response.status})`);
+              throw new Error(`Daily P&L request failed (${response.status})`);
             }
             const payload = await response.json();
             document.getElementById('latest-nav').textContent =
@@ -527,7 +541,7 @@ def portfolio_page() -> str:
 
             const calendar = document.getElementById('pnl-calendar');
             if (!payload.points.length) {
-              calendar.innerHTML = '<div class="chart-note">No daily P&amp;L available.</div>';
+              calendar.innerHTML = '<div class="chart-note">No daily P&L available.</div>';
               return;
             }
             const firstDate = new Date(`${payload.points[0].calendar_date}T00:00:00`);
@@ -535,9 +549,7 @@ def portfolio_page() -> str:
             const spacers = '<div class="calendar-spacer" aria-hidden="true"></div>'
               .repeat(mondayOffset);
             const weekdays = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
-              .map((day) => (
-                `<div class="calendar-weekday" role="columnheader">${day}</div>`
-              ))
+              .map((day) => `<div class="calendar-weekday">${day}</div>`)
               .join('');
             let previousDay = null;
             const cells = payload.points.map((point) => {
@@ -551,7 +563,7 @@ def portfolio_page() -> str:
               return `${gaps}${calendarCell(point, payload.reporting_currency)}`;
             }).join('');
             calendar.innerHTML = `
-              <div class="calendar-grid" role="grid" aria-label="Daily indicative P&amp;L">
+              <div class="calendar-grid">
                 ${weekdays}${spacers}${cells}
               </div>
             `;
@@ -711,7 +723,7 @@ def portfolio_page() -> str:
           });
           loadDailyPnl().catch(() => {
             document.getElementById('pnl-calendar').innerHTML =
-              '<div class="chart-note">Indicative daily P&amp;L unavailable.</div>';
+              '<div class="chart-note">Indicative daily P&L unavailable.</div>';
           });
           document.getElementById('refresh-portfolio')
             .addEventListener('click', refreshPortfolio);

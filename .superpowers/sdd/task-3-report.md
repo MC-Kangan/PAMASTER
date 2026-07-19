@@ -77,3 +77,36 @@ task handoff after the commit is finalized.
   `docs/superpowers/plans/2026-07-19-indicative-pnl-dashboard-mvp.md`, was already present
   and remains intentionally outside this task commit.
 - The focused suite reports the existing Starlette `TestClient`/`httpx` deprecation warning.
+
+## Review-finding fix
+
+Files updated:
+
+- `backend/tests/integration/test_api_routes.py` now rejects the unsupported composite-grid
+  roles, requires focusable semantic `<time>` day elements and visible coverage markup, and
+  checks that raw JavaScript uses `P&L` rather than an HTML entity.
+- `backend/src/pa_investing/analytics_app/pages.py` keeps the seven-column CSS layout and
+  blank date spacers while replacing ARIA grid roles with focusable `<time datetime>` cells,
+  a visible focus outline, and compact visible per-day coverage text.
+
+Review-fix RED command:
+
+```bash
+cd backend
+/Users/chenkangan/Documents/PAMASTER/backend/.venv/bin/python -m pytest tests/integration/test_api_routes.py::test_performance_analysis_page_renders -v
+```
+
+Result before the fix: **1 failed** at `assert 'role="grid"' not in response.text`,
+confirming the contract detected the invalid composite role before implementation.
+
+The same page contract test passed after implementation. Fresh focused verification ran:
+
+```bash
+/Users/chenkangan/Documents/PAMASTER/backend/.venv/bin/python -m pytest tests/unit/test_performance_history.py tests/integration/test_api_routes.py -v
+/Users/chenkangan/Documents/PAMASTER/backend/.venv/bin/ruff check src/pa_investing tests/unit/test_performance_history.py tests/integration/test_api_routes.py
+git diff --check
+```
+
+Result: **31 passed**, Ruff reported **All checks passed**, and `git diff --check`
+exited successfully. The existing third-party Starlette `TestClient`/`httpx` warning remains.
+The immutable review-fix commit hash is supplied in the task handoff.
