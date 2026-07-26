@@ -9,6 +9,8 @@ from pa_investing.db.base import Base
 from pa_investing.db.repositories import (
     AccountRepository,
     AppSettingRepository,
+    BrokerDailyNavRepository,
+    BrokerDailyPnlRepository,
     FxRateRepository,
     MarketDataMappingRepository,
     PositionRepository,
@@ -17,6 +19,8 @@ from pa_investing.db.repositories import (
 from pa_investing.domain.enums import AssetClass, CostBasisStatus
 from pa_investing.domain.models import (
     Account,
+    BrokerDailyNav,
+    BrokerDailyPnl,
     FxRatePoint,
     Instrument,
     InstrumentIdentifier,
@@ -118,6 +122,82 @@ def test_account_and_app_setting_repositories_round_trip() -> None:
         )
     ]
     assert stored_base_currency == "USD"
+
+
+def test_broker_daily_pnl_repository_ranks_latest_contributors() -> None:
+    engine = create_engine("sqlite+pysqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    session_factory = sessionmaker(bind=engine)
+
+    with session_factory() as session:
+        AccountRepository(session).upsert(
+            Account(account_id="U123", name="IBKR", source="ibkr-flex")
+        )
+        repository = BrokerDailyPnlRepository(session)
+        for symbol, report_date, total in (
+            ("AAPL", datetime(2026, 7, 23).date(), Decimal("5")),
+            ("MSFT", datetime(2026, 7, 24).date(), Decimal("-2")),
+            ("SAP", datetime(2026, 7, 24).date(), Decimal("10")),
+        ):
+            repository.upsert(
+                BrokerDailyPnl(
+                    account_id="U123",
+                    report_date=report_date,
+                    provider="ibkr-flex",
+                    symbol=symbol,
+                    asset_class="STK",
+                    previous_close_quantity=Decimal("1"),
+                    previous_close_price=Decimal("100"),
+                    close_quantity=Decimal("1"),
+                    close_price=Decimal("101"),
+                    transaction_mtm=Decimal("0"),
+                    prior_open_mtm=total,
+                    commissions=Decimal("0"),
+                    total=total,
+                )
+            )
+        session.commit()
+
+        contributors = repository.latest_contributors()
+
+    assert [point.symbol for point in contributors] == ["SAP", "MSFT"]
+    assert contributors[0].report_date == datetime(2026, 7, 24).date()
+
+
+def test_broker_daily_nav_repository_round_trips_broker_mtm() -> None:
+    engine = create_engine("sqlite+pysqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    session_factory = sessionmaker(bind=engine)
+
+    with session_factory() as session:
+        AccountRepository(session).upsert(
+            Account(account_id="U123", name="IBKR", source="ibkr-flex")
+        )
+        repository = BrokerDailyNavRepository(session)
+        repository.upsert(
+            BrokerDailyNav(
+                account_id="U123",
+                report_date=datetime(2026, 7, 24).date(),
+                provider="ibkr-flex",
+                currency="GBP",
+                starting_value=Decimal("11964.198030989"),
+                ending_value=Decimal("11987.492084189"),
+                mtm=Decimal("23.2940532"),
+                realized=Decimal("0"),
+                change_in_unrealized=Decimal("0"),
+                deposits_withdrawals=Decimal("0"),
+                commissions=Decimal("0"),
+                dividends=Decimal("0"),
+                interest=Decimal("0"),
+            )
+        )
+        session.commit()
+
+        points = repository.list_history()
+
+    assert len(points) == 1
+    assert points[0].ending_value == Decimal("11987.49208419")
+    assert points[0].mtm == Decimal("23.29405320")
 
 
 def test_position_cost_basis_status_round_trip() -> None:

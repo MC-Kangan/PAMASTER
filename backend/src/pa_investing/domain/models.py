@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
 
 from pydantic import BaseModel, ConfigDict, field_validator, model_validator
@@ -238,6 +238,49 @@ class PortfolioSnapshot(BaseModel):
     position_count: int = 0
     valued_position_count: int = 0
     reporting_coverage: Decimal = Decimal("1")
+
+
+class BrokerDailyPnl(BaseModel):
+    account_id: str
+    report_date: date
+    provider: str
+    symbol: str
+    asset_class: str
+    previous_close_quantity: Decimal
+    previous_close_price: Decimal
+    close_quantity: Decimal
+    close_price: Decimal
+    transaction_mtm: Decimal
+    prior_open_mtm: Decimal
+    commissions: Decimal
+    total: Decimal
+    is_total: bool = False
+
+    @field_validator("symbol", "asset_class")
+    @classmethod
+    def uppercase_optional_symbol_field(cls, value: str) -> str:
+        return value.upper()
+
+
+class BrokerDailyNav(BaseModel):
+    account_id: str
+    report_date: date
+    provider: str
+    currency: str
+    starting_value: Decimal
+    ending_value: Decimal
+    mtm: Decimal
+    realized: Decimal
+    change_in_unrealized: Decimal
+    deposits_withdrawals: Decimal
+    commissions: Decimal
+    dividends: Decimal
+    interest: Decimal
+
+    @field_validator("currency")
+    @classmethod
+    def uppercase_currency(cls, value: str) -> str:
+        return value.upper()
 
 
 class Signal(BaseModel):

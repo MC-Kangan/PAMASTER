@@ -230,6 +230,14 @@ def portfolio_page() -> str:
             background: #f8fafc;
             color: #475569;
           }
+          .pnl-text-positive {
+            color: #166534;
+            font-weight: 650;
+          }
+          .pnl-text-negative {
+            color: #991b1b;
+            font-weight: 650;
+          }
           .chart-grid {
             display: grid;
             grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
@@ -373,11 +381,11 @@ def portfolio_page() -> str:
                   <div class="kpi-value" id="latest-nav">--</div>
                 </article>
                 <article class="kpi-card">
-                  <div class="kpi-label">Indicative DTD P&amp;L</div>
+                  <div class="kpi-label" id="dtd-pnl-label">DTD P&amp;L</div>
                   <div class="kpi-value" id="dtd-pnl-amount">--</div>
                 </article>
                 <article class="kpi-card">
-                  <div class="kpi-label">Indicative DTD return</div>
+                  <div class="kpi-label" id="dtd-return-label">DTD return</div>
                   <div class="kpi-value" id="dtd-pnl-percent">--</div>
                 </article>
                 <article class="kpi-card">
@@ -408,13 +416,40 @@ def portfolio_page() -> str:
                 </article>
               </section>
               <section class="chart-panel calendar" aria-labelledby="calendar-heading">
-                <h2 id="calendar-heading">Indicative P&amp;L Calendar</h2>
-                <p class="chart-note">
-                  Indicative values compare available daily snapshots and are not adjusted for
-                  cash flows, trades, dividends, fees, or taxes.
+                <h2 id="calendar-heading">P&amp;L Calendar</h2>
+                <p class="chart-note" id="calendar-note">
+                  Loading daily P&amp;L source...
                 </p>
                 <div id="pnl-calendar" aria-live="polite">
                   <div class="chart-note">Loading indicative daily P&amp;L...</div>
+                </div>
+              </section>
+              <section class="chart-panel" aria-labelledby="broker-pnl-heading">
+                <h2 id="broker-pnl-heading">Latest Broker P&amp;L Contributors</h2>
+                <p class="chart-note" id="broker-pnl-note">
+                  Loading broker-reported daily P&amp;L...
+                </p>
+                <div class="table-shell">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>Symbol</th>
+                        <th>Asset</th>
+                        <th>Close Qty</th>
+                        <th>Prior Open MTM</th>
+                        <th>Trade MTM</th>
+                        <th>Commissions</th>
+                        <th>Total</th>
+                      </tr>
+                    </thead>
+                    <tbody id="broker-pnl-body">
+                      <tr>
+                        <td class="empty-state" colspan="7">
+                          Loading /analysis/broker-daily-pnl ...
+                        </td>
+                      </tr>
+                    </tbody>
+                  </table>
                 </div>
               </section>
               <section class="chart-panel" id="performance-history">
@@ -535,6 +570,15 @@ def portfolio_page() -> str:
               formatCurrency(payload.dtd_pnl_amount, payload.reporting_currency);
             document.getElementById('dtd-pnl-percent').textContent =
               formatValue(payload.dtd_pnl_percent, 'percent');
+            document.getElementById('dtd-pnl-label').textContent = payload.indicative
+              ? 'Indicative DTD P&L'
+              : 'Broker DTD P&L';
+            document.getElementById('dtd-return-label').textContent = payload.indicative
+              ? 'Indicative DTD return'
+              : 'Broker DTD return';
+            document.getElementById('calendar-note').textContent = payload.indicative
+              ? 'Indicative values compare available daily snapshots.'
+              : 'Broker-reported daily P&L uses IBKR Change in NAV MTM.';
 
             const latestPoint = payload.points[payload.points.length - 1];
             document.getElementById('reporting-coverage').textContent = latestPoint
@@ -606,6 +650,7 @@ def portfolio_page() -> str:
                 loadCurrentPortfolio(),
                 loadPerformance(),
                 loadDailyPnl(),
+                loadBrokerDailyPnl(),
               ]);
               if (reloadResults.some((result) => result.status === 'rejected')) {
                 status.textContent = 'Portfolio refreshed, but some panels failed to reload.';
@@ -725,6 +770,45 @@ def portfolio_page() -> str:
               `;
             }).join('');
           }
+
+          async function loadBrokerDailyPnl() {
+            const response = await fetch('/analysis/broker-daily-pnl?limit=12');
+            if (!response.ok) {
+              throw new Error(`Broker P&L request failed (${response.status})`);
+            }
+            const payload = await response.json();
+            const body = document.getElementById('broker-pnl-body');
+            const note = document.getElementById('broker-pnl-note');
+            if (!payload.points.length) {
+              note.textContent = 'No broker-reported daily P&L has been imported yet.';
+              body.innerHTML = `
+                <tr>
+                  <td class="empty-state" colspan="7">
+                    No broker daily P&L available.
+                  </td>
+                </tr>
+              `;
+              return;
+            }
+            note.textContent = `Latest report date: ${payload.latest_report_date}`;
+            body.innerHTML = payload.points.map((point) => {
+              const total = Number(point.total);
+              const tone = Number.isNaN(total) || total === 0
+                ? ''
+                : total > 0 ? ' class="pnl-text-positive"' : ' class="pnl-text-negative"';
+              return `
+                <tr>
+                  <td>${escapeHtml(point.symbol)}</td>
+                  <td>${escapeHtml(point.asset_class)}</td>
+                  <td>${formatValue(point.close_quantity, 'currency')}</td>
+                  <td>${formatCurrency(point.prior_open_mtm, null)}</td>
+                  <td>${formatCurrency(point.transaction_mtm, null)}</td>
+                  <td>${formatCurrency(point.commissions, null)}</td>
+                  <td${tone}>${formatCurrency(point.total, null)}</td>
+                </tr>
+              `;
+            }).join('');
+          }
           loadPerformance().catch(() => {
             document.getElementById('performance-body').innerHTML = `
               <tr>
@@ -741,6 +825,17 @@ def portfolio_page() -> str:
           loadDailyPnl().catch(() => {
             document.getElementById('pnl-calendar').innerHTML =
               '<div class="chart-note">Indicative daily P&L unavailable.</div>';
+          });
+          loadBrokerDailyPnl().catch(() => {
+            document.getElementById('broker-pnl-note').textContent =
+              'Broker-reported daily P&L unavailable.';
+            document.getElementById('broker-pnl-body').innerHTML = `
+              <tr>
+                <td class="empty-state" colspan="7">
+                  Broker daily P&L unavailable.
+                </td>
+              </tr>
+            `;
           });
           document.getElementById('refresh-portfolio')
             .addEventListener('click', refreshPortfolio);

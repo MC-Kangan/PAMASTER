@@ -337,6 +337,9 @@ class IbkrFlexConnector(BrokerConnector):
             )
         return reconciliations
 
+    def fetch_statement_root(self) -> ElementTree.Element:
+        return self._load_statement()
+
     def _load_statement(self) -> ElementTree.Element:
         if self._statement_root is not None:
             return self._statement_root

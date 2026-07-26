@@ -22,6 +22,7 @@ class Settings(BaseSettings):
     )
     ibkr_flex_token: str = ""
     ibkr_flex_query_id: str = ""
+    ibkr_flex_history_query_id: str = ""
     llm_provider: str = "mock"
     openai_api_key: str = ""
     default_base_currency: str = "USD"

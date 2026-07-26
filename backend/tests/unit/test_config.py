@@ -24,6 +24,7 @@ def test_settings_include_live_notion_and_market_data_fields() -> None:
         alpha_vantage_api_key="alpha-key",
         twelve_data_api_key="twelve-key",
         ibkr_gateway_base_url="https://127.0.0.1:5000/v1/api",
+        ibkr_flex_history_query_id="history-query",
     )
 
     assert settings.notion_signals_database_id == "signals-db"
@@ -35,3 +36,4 @@ def test_settings_include_live_notion_and_market_data_fields() -> None:
     assert settings.alpha_vantage_api_key == "alpha-key"
     assert settings.twelve_data_api_key == "twelve-key"
     assert settings.ibkr_gateway_base_url == "https://127.0.0.1:5000/v1/api"
+    assert settings.ibkr_flex_history_query_id == "history-query"

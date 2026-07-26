@@ -56,6 +56,27 @@ class IndicativeDailyPnlResponse(BaseModel):
     points: list[IndicativeDailyPnlPointResponse]
 
 
+class BrokerDailyPnlPointResponse(BaseModel):
+    account_id: str
+    report_date: date
+    provider: str
+    symbol: str
+    asset_class: str
+    previous_close_quantity: str
+    previous_close_price: str
+    close_quantity: str
+    close_price: str
+    transaction_mtm: str
+    prior_open_mtm: str
+    commissions: str
+    total: str
+
+
+class BrokerDailyPnlResponse(BaseModel):
+    latest_report_date: date | None
+    points: list[BrokerDailyPnlPointResponse]
+
+
 class CurrentHoldingResponse(BaseModel):
     symbol: str
     asset_class: str

@@ -7,6 +7,8 @@ from fastapi.testclient import TestClient
 from pa_investing.core.config import Settings
 from pa_investing.core.dependencies import (
     OperationsAnalysisContext,
+    get_broker_daily_nav_repository,
+    get_broker_daily_pnl_repository,
     get_historical_data_service,
     get_instrument_resolution_service,
     get_operations_analysis_context,
@@ -24,6 +26,8 @@ from pa_investing.domain.enums import (
     TransactionType,
 )
 from pa_investing.domain.models import (
+    BrokerDailyNav,
+    BrokerDailyPnl,
     BrokerReconciliation,
     Instrument,
     PortfolioSnapshot,
@@ -509,8 +513,16 @@ def test_indicative_daily_pnl_route_returns_summary_and_points() -> None:
 
     from pa_investing.core.dependencies import get_portfolio_snapshot_repository
 
+    class EmptyBrokerDailyNavRepository:
+        def list_history(self, days: int | None = None) -> list[BrokerDailyNav]:
+            assert days == 90
+            return []
+
     app.dependency_overrides[get_portfolio_snapshot_repository] = (
         lambda: FakePortfolioSnapshotRepository()
+    )
+    app.dependency_overrides[get_broker_daily_nav_repository] = (
+        lambda: EmptyBrokerDailyNavRepository()
     )
     response = TestClient(app).get("/analysis/daily-pnl?days=90")
 
@@ -520,6 +532,129 @@ def test_indicative_daily_pnl_route_returns_summary_and_points() -> None:
     assert response.json()["points"][0]["pnl_amount"] is None
     assert response.json()["points"][1]["calendar_date"] == "2026-07-10"
     assert response.json()["indicative"] is True
+
+
+def test_daily_pnl_route_prefers_broker_change_in_nav_mtm() -> None:
+    app = create_app()
+    app.dependency_overrides[get_settings] = lambda: Settings(
+        analytics_auth_enabled=False,
+    )
+
+    class FakePortfolioSnapshotRepository:
+        def list_history(self, days: int | None = None) -> list[PortfolioSnapshot]:
+            raise AssertionError("snapshot fallback should not be used")
+
+    class FakeBrokerDailyNavRepository:
+        def list_history(self, days: int | None = None) -> list[BrokerDailyNav]:
+            assert days == 220
+            return [
+                BrokerDailyNav(
+                    account_id="U1",
+                    report_date=datetime(2026, 7, 23).date(),
+                    provider="ibkr-flex",
+                    currency="GBP",
+                    starting_value=Decimal("1000"),
+                    ending_value=Decimal("1010"),
+                    mtm=Decimal("7"),
+                    realized=Decimal("0"),
+                    change_in_unrealized=Decimal("0"),
+                    deposits_withdrawals=Decimal("3"),
+                    commissions=Decimal("0"),
+                    dividends=Decimal("0"),
+                    interest=Decimal("0"),
+                ),
+                BrokerDailyNav(
+                    account_id="U1",
+                    report_date=datetime(2026, 7, 24).date(),
+                    provider="ibkr-flex",
+                    currency="GBP",
+                    starting_value=Decimal("1010"),
+                    ending_value=Decimal("1005"),
+                    mtm=Decimal("-5"),
+                    realized=Decimal("0"),
+                    change_in_unrealized=Decimal("0"),
+                    deposits_withdrawals=Decimal("0"),
+                    commissions=Decimal("0"),
+                    dividends=Decimal("0"),
+                    interest=Decimal("0"),
+                ),
+            ]
+
+    from pa_investing.core.dependencies import get_portfolio_snapshot_repository
+
+    app.dependency_overrides[get_portfolio_snapshot_repository] = (
+        lambda: FakePortfolioSnapshotRepository()
+    )
+    app.dependency_overrides[get_broker_daily_nav_repository] = (
+        lambda: FakeBrokerDailyNavRepository()
+    )
+
+    response = TestClient(app).get("/analysis/daily-pnl?days=220")
+
+    assert response.status_code == 200
+    assert response.json()["indicative"] is False
+    assert response.json()["dtd_pnl_amount"] == "-5"
+    assert response.json()["points"][0]["pnl_amount"] == "7"
+    assert response.json()["points"][0]["pnl_percent"] == "0.007"
+
+
+def test_broker_daily_pnl_route_returns_latest_contributors() -> None:
+    app = create_app()
+    app.dependency_overrides[get_settings] = lambda: Settings(
+        analytics_auth_enabled=False,
+    )
+
+    class FakeBrokerDailyPnlRepository:
+        def latest_report_date(self):
+            return datetime(2026, 7, 24).date()
+
+        def latest_contributors(self, limit: int = 10) -> list[BrokerDailyPnl]:
+            assert limit == 3
+            return [
+                BrokerDailyPnl(
+                    account_id="U1",
+                    report_date=datetime(2026, 7, 24).date(),
+                    provider="ibkr-flex",
+                    symbol="SAP",
+                    asset_class="STK",
+                    previous_close_quantity=Decimal("4"),
+                    previous_close_price=Decimal("128.32"),
+                    close_quantity=Decimal("4"),
+                    close_price=Decimal("140.2"),
+                    transaction_mtm=Decimal("0"),
+                    prior_open_mtm=Decimal("40.5516672"),
+                    commissions=Decimal("0"),
+                    total=Decimal("40.5516672"),
+                )
+            ]
+
+    app.dependency_overrides[get_broker_daily_pnl_repository] = (
+        lambda: FakeBrokerDailyPnlRepository()
+    )
+
+    response = TestClient(app).get("/analysis/broker-daily-pnl?limit=3")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "latest_report_date": "2026-07-24",
+        "points": [
+            {
+                "account_id": "U1",
+                "report_date": "2026-07-24",
+                "provider": "ibkr-flex",
+                "symbol": "SAP",
+                "asset_class": "STK",
+                "previous_close_quantity": "4",
+                "previous_close_price": "128.32",
+                "close_quantity": "4",
+                "close_price": "140.2",
+                "transaction_mtm": "0",
+                "prior_open_mtm": "40.5516672",
+                "commissions": "0",
+                "total": "40.5516672",
+            }
+        ],
+    }
 
 
 def test_indicative_daily_pnl_route_returns_empty_series_when_no_history_exists() -> None:
@@ -533,10 +668,18 @@ def test_indicative_daily_pnl_route_returns_empty_series_when_no_history_exists(
             assert days == 90
             return []
 
+    class EmptyBrokerDailyNavRepository:
+        def list_history(self, days: int | None = None) -> list[BrokerDailyNav]:
+            assert days == 90
+            return []
+
     from pa_investing.core.dependencies import get_portfolio_snapshot_repository
 
     app.dependency_overrides[get_portfolio_snapshot_repository] = (
         lambda: FakePortfolioSnapshotRepository()
+    )
+    app.dependency_overrides[get_broker_daily_nav_repository] = (
+        lambda: EmptyBrokerDailyNavRepository()
     )
     response = TestClient(app).get("/analysis/daily-pnl?days=90")
 
@@ -735,7 +878,7 @@ def test_performance_analysis_page_renders() -> None:
     assert "'X-PA-Request': 'refresh'" in response.text
     assert "Promise.allSettled" in response.text
     assert "Portfolio refreshed, but some panels failed to reload." in response.text
-    assert "cash flows, trades, dividends, fees, or taxes" in response.text
+    assert "Broker-reported daily P&L uses IBKR Change in NAV MTM." in response.text
     assert 'role="grid"' not in response.text
     assert 'role="columnheader"' not in response.text
     assert 'role="gridcell"' not in response.text

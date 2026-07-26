@@ -1,10 +1,10 @@
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 from decimal import Decimal
 
 from pydantic import BaseModel, ConfigDict
 
 from pa_investing.analytics.performance import latest_snapshot_per_day
-from pa_investing.domain.models import PortfolioSnapshot
+from pa_investing.domain.models import BrokerDailyNav, PortfolioSnapshot
 
 
 class IndicativeDailyPnlPoint(BaseModel):
@@ -86,5 +86,63 @@ def build_indicative_daily_pnl(
         latest_observed_at=latest_point.observed_at,
         dtd_pnl_amount=latest_point.pnl_amount,
         dtd_pnl_percent=latest_point.pnl_percent,
+        points=points,
+    )
+
+
+def build_broker_daily_pnl(
+    daily_nav: list[BrokerDailyNav],
+) -> IndicativeDailyPnlHistory:
+    if not daily_nav:
+        return IndicativeDailyPnlHistory(
+            reporting_currency=None,
+            latest_nav=None,
+            latest_observed_at=None,
+            dtd_pnl_amount=None,
+            dtd_pnl_percent=None,
+            indicative=False,
+            points=[],
+        )
+
+    latest_nav = max(daily_nav, key=lambda point: point.report_date)
+    reporting_currency = latest_nav.currency
+    filtered = [
+        point for point in daily_nav if point.currency == reporting_currency
+    ]
+    filtered.sort(key=lambda point: (point.report_date, point.account_id))
+
+    points: list[IndicativeDailyPnlPoint] = []
+    previous_point: BrokerDailyNav | None = None
+    for point in filtered:
+        pnl_percent = None
+        if point.starting_value != 0:
+            pnl_percent = point.mtm / point.starting_value
+        points.append(
+            IndicativeDailyPnlPoint(
+                calendar_date=point.report_date,
+                observed_at=datetime.combine(
+                    point.report_date,
+                    datetime.min.time(),
+                    tzinfo=UTC,
+                ),
+                comparison_date=(
+                    previous_point.report_date if previous_point is not None else None
+                ),
+                ending_nav=point.ending_value,
+                pnl_amount=point.mtm,
+                pnl_percent=pnl_percent,
+                reporting_coverage=Decimal("1"),
+            )
+        )
+        previous_point = point
+
+    latest_point = points[-1]
+    return IndicativeDailyPnlHistory(
+        reporting_currency=reporting_currency,
+        latest_nav=latest_point.ending_nav,
+        latest_observed_at=latest_point.observed_at,
+        dtd_pnl_amount=latest_point.pnl_amount,
+        dtd_pnl_percent=latest_point.pnl_percent,
+        indicative=False,
         points=points,
     )

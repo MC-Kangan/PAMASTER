@@ -10,6 +10,8 @@ from pa_investing.db.repositories import (
     AccountRepository,
     AppSettingRepository,
     AuditEventRepository,
+    BrokerDailyNavRepository,
+    BrokerDailyPnlRepository,
     BrokerReconciliationRepository,
     FxRateRepository,
     HistoricalDataRepository,
@@ -162,6 +164,18 @@ def get_portfolio_snapshot_repository() -> Iterator[PortfolioSnapshotRepository]
     session_factory = get_database_session_factory()
     with session_factory.session() as session:
         yield PortfolioSnapshotRepository(session)
+
+
+def get_broker_daily_pnl_repository() -> Iterator[BrokerDailyPnlRepository]:
+    session_factory = get_database_session_factory()
+    with session_factory.session() as session:
+        yield BrokerDailyPnlRepository(session)
+
+
+def get_broker_daily_nav_repository() -> Iterator[BrokerDailyNavRepository]:
+    session_factory = get_database_session_factory()
+    with session_factory.session() as session:
+        yield BrokerDailyNavRepository(session)
 
 
 def get_portfolio_analysis_context() -> Iterator[PortfolioAnalysisContext]:

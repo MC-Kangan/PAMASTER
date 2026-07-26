@@ -283,6 +283,83 @@ class PortfolioSnapshotRecord(Base):
     )
 
 
+class BrokerDailyPnlRecord(Base):
+    __tablename__ = "broker_daily_pnl"
+    __table_args__ = (
+        UniqueConstraint(
+            "account_id",
+            "report_date",
+            "provider",
+            "symbol",
+            "asset_class",
+            name="uq_broker_daily_pnl_account_date_symbol",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    account_id: Mapped[str] = mapped_column(
+        ForeignKey("accounts.account_id"),
+        nullable=False,
+        index=True,
+    )
+    report_date: Mapped[date] = mapped_column(Date(), nullable=False, index=True)
+    provider: Mapped[str] = mapped_column(String(64), nullable=False)
+    symbol: Mapped[str] = mapped_column(String(64), nullable=False)
+    asset_class: Mapped[str] = mapped_column(String(32), nullable=False)
+    previous_close_quantity: Mapped[Decimal] = mapped_column(
+        Numeric(24, 8),
+        nullable=False,
+    )
+    previous_close_price: Mapped[Decimal] = mapped_column(
+        Numeric(24, 10),
+        nullable=False,
+    )
+    close_quantity: Mapped[Decimal] = mapped_column(Numeric(24, 8), nullable=False)
+    close_price: Mapped[Decimal] = mapped_column(Numeric(24, 10), nullable=False)
+    transaction_mtm: Mapped[Decimal] = mapped_column(Numeric(24, 8), nullable=False)
+    prior_open_mtm: Mapped[Decimal] = mapped_column(Numeric(24, 8), nullable=False)
+    commissions: Mapped[Decimal] = mapped_column(Numeric(24, 8), nullable=False)
+    total: Mapped[Decimal] = mapped_column(Numeric(24, 8), nullable=False)
+    is_total: Mapped[bool] = mapped_column(nullable=False, default=False)
+
+
+class BrokerDailyNavRecord(Base):
+    __tablename__ = "broker_daily_nav"
+    __table_args__ = (
+        UniqueConstraint(
+            "account_id",
+            "report_date",
+            "provider",
+            name="uq_broker_daily_nav_account_date_provider",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    account_id: Mapped[str] = mapped_column(
+        ForeignKey("accounts.account_id"),
+        nullable=False,
+        index=True,
+    )
+    report_date: Mapped[date] = mapped_column(Date(), nullable=False, index=True)
+    provider: Mapped[str] = mapped_column(String(64), nullable=False)
+    currency: Mapped[str] = mapped_column(String(8), nullable=False)
+    starting_value: Mapped[Decimal] = mapped_column(Numeric(24, 8), nullable=False)
+    ending_value: Mapped[Decimal] = mapped_column(Numeric(24, 8), nullable=False)
+    mtm: Mapped[Decimal] = mapped_column(Numeric(24, 8), nullable=False)
+    realized: Mapped[Decimal] = mapped_column(Numeric(24, 8), nullable=False)
+    change_in_unrealized: Mapped[Decimal] = mapped_column(
+        Numeric(24, 8),
+        nullable=False,
+    )
+    deposits_withdrawals: Mapped[Decimal] = mapped_column(
+        Numeric(24, 8),
+        nullable=False,
+    )
+    commissions: Mapped[Decimal] = mapped_column(Numeric(24, 8), nullable=False)
+    dividends: Mapped[Decimal] = mapped_column(Numeric(24, 8), nullable=False)
+    interest: Mapped[Decimal] = mapped_column(Numeric(24, 8), nullable=False)
+
+
 class TransactionRecord(Base):
     __tablename__ = "transactions"
 

@@ -11,6 +11,8 @@ from pa_investing.db.models import (
     AccountRecord,
     AppSettingRecord,
     AuditEventRecord,
+    BrokerDailyNavRecord,
+    BrokerDailyPnlRecord,
     BrokerReconciliationRecord,
     FxRateRecord,
     HistoricalDailyBarRecord,
@@ -39,6 +41,8 @@ from pa_investing.domain.enums import (
 )
 from pa_investing.domain.models import (
     Account,
+    BrokerDailyNav,
+    BrokerDailyPnl,
     BrokerReconciliation,
     FxRatePoint,
     Instrument,
@@ -934,6 +938,170 @@ class PortfolioSnapshotRepository:
             )
             for row in rows
         ]
+
+
+class BrokerDailyPnlRepository:
+    def __init__(self, session: Session) -> None:
+        self.session = session
+
+    def upsert(self, point: BrokerDailyPnl) -> None:
+        record = self.session.scalar(
+            select(BrokerDailyPnlRecord).where(
+                BrokerDailyPnlRecord.account_id == point.account_id,
+                BrokerDailyPnlRecord.report_date == point.report_date,
+                BrokerDailyPnlRecord.provider == point.provider,
+                BrokerDailyPnlRecord.symbol == point.symbol,
+                BrokerDailyPnlRecord.asset_class == point.asset_class,
+            )
+        )
+        if record is None:
+            record = BrokerDailyPnlRecord(
+                account_id=point.account_id,
+                report_date=point.report_date,
+                provider=point.provider,
+                symbol=point.symbol,
+                asset_class=point.asset_class,
+            )
+            self.session.add(record)
+        record.previous_close_quantity = point.previous_close_quantity
+        record.previous_close_price = point.previous_close_price
+        record.close_quantity = point.close_quantity
+        record.close_price = point.close_price
+        record.transaction_mtm = point.transaction_mtm
+        record.prior_open_mtm = point.prior_open_mtm
+        record.commissions = point.commissions
+        record.total = point.total
+        record.is_total = point.is_total
+
+    def list_history(
+        self,
+        days: int | None = None,
+        now: datetime | None = None,
+        include_totals: bool = False,
+    ) -> list[BrokerDailyPnl]:
+        stmt = select(BrokerDailyPnlRecord).order_by(
+            BrokerDailyPnlRecord.report_date.asc(),
+            BrokerDailyPnlRecord.account_id.asc(),
+            BrokerDailyPnlRecord.symbol.asc(),
+        )
+        if days is not None:
+            cutoff = (_normalize_utc_timestamp(now or datetime.now(tz=UTC)).date()) - timedelta(
+                days=days
+            )
+            stmt = stmt.where(BrokerDailyPnlRecord.report_date >= cutoff)
+        if not include_totals:
+            stmt = stmt.where(BrokerDailyPnlRecord.is_total.is_(False))
+        return [
+            self._point_from_record(row)
+            for row in self.session.scalars(stmt).all()
+        ]
+
+    def latest_report_date(self) -> date | None:
+        return self.session.scalar(
+            select(BrokerDailyPnlRecord.report_date)
+            .where(BrokerDailyPnlRecord.is_total.is_(False))
+            .order_by(BrokerDailyPnlRecord.report_date.desc())
+        )
+
+    def latest_contributors(self, limit: int = 10) -> list[BrokerDailyPnl]:
+        report_date = self.latest_report_date()
+        if report_date is None:
+            return []
+        rows = self.session.scalars(
+            select(BrokerDailyPnlRecord).where(
+                BrokerDailyPnlRecord.report_date == report_date,
+                BrokerDailyPnlRecord.is_total.is_(False),
+            )
+        ).all()
+        ranked = sorted(rows, key=lambda row: abs(row.total), reverse=True)
+        return [self._point_from_record(row) for row in ranked[:limit]]
+
+    @staticmethod
+    def _point_from_record(record: BrokerDailyPnlRecord) -> BrokerDailyPnl:
+        return BrokerDailyPnl(
+            account_id=record.account_id,
+            report_date=record.report_date,
+            provider=record.provider,
+            symbol=record.symbol,
+            asset_class=record.asset_class,
+            previous_close_quantity=record.previous_close_quantity,
+            previous_close_price=record.previous_close_price,
+            close_quantity=record.close_quantity,
+            close_price=record.close_price,
+            transaction_mtm=record.transaction_mtm,
+            prior_open_mtm=record.prior_open_mtm,
+            commissions=record.commissions,
+            total=record.total,
+            is_total=record.is_total,
+        )
+
+
+class BrokerDailyNavRepository:
+    def __init__(self, session: Session) -> None:
+        self.session = session
+
+    def upsert(self, point: BrokerDailyNav) -> None:
+        record = self.session.scalar(
+            select(BrokerDailyNavRecord).where(
+                BrokerDailyNavRecord.account_id == point.account_id,
+                BrokerDailyNavRecord.report_date == point.report_date,
+                BrokerDailyNavRecord.provider == point.provider,
+            )
+        )
+        if record is None:
+            record = BrokerDailyNavRecord(
+                account_id=point.account_id,
+                report_date=point.report_date,
+                provider=point.provider,
+            )
+            self.session.add(record)
+        record.currency = point.currency
+        record.starting_value = point.starting_value
+        record.ending_value = point.ending_value
+        record.mtm = point.mtm
+        record.realized = point.realized
+        record.change_in_unrealized = point.change_in_unrealized
+        record.deposits_withdrawals = point.deposits_withdrawals
+        record.commissions = point.commissions
+        record.dividends = point.dividends
+        record.interest = point.interest
+
+    def list_history(
+        self,
+        days: int | None = None,
+        now: datetime | None = None,
+    ) -> list[BrokerDailyNav]:
+        stmt = select(BrokerDailyNavRecord).order_by(
+            BrokerDailyNavRecord.report_date.asc(),
+            BrokerDailyNavRecord.account_id.asc(),
+        )
+        if days is not None:
+            cutoff = (_normalize_utc_timestamp(now or datetime.now(tz=UTC)).date()) - timedelta(
+                days=days
+            )
+            stmt = stmt.where(BrokerDailyNavRecord.report_date >= cutoff)
+        return [
+            self._point_from_record(row)
+            for row in self.session.scalars(stmt).all()
+        ]
+
+    @staticmethod
+    def _point_from_record(record: BrokerDailyNavRecord) -> BrokerDailyNav:
+        return BrokerDailyNav(
+            account_id=record.account_id,
+            report_date=record.report_date,
+            provider=record.provider,
+            currency=record.currency,
+            starting_value=record.starting_value,
+            ending_value=record.ending_value,
+            mtm=record.mtm,
+            realized=record.realized,
+            change_in_unrealized=record.change_in_unrealized,
+            deposits_withdrawals=record.deposits_withdrawals,
+            commissions=record.commissions,
+            dividends=record.dividends,
+            interest=record.interest,
+        )
 
 
 class SignalRepository:

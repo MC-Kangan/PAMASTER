@@ -5,7 +5,10 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import HTMLResponse
 
-from pa_investing.analytics.daily_pnl import build_indicative_daily_pnl
+from pa_investing.analytics.daily_pnl import (
+    build_broker_daily_pnl,
+    build_indicative_daily_pnl,
+)
 from pa_investing.analytics.performance import (
     build_performance_history,
     latest_snapshot_per_day,
@@ -19,6 +22,8 @@ from pa_investing.api.auth import (
     require_workflow_auth,
 )
 from pa_investing.api.schemas import (
+    BrokerDailyPnlPointResponse,
+    BrokerDailyPnlResponse,
     CurrentHoldingResponse,
     CurrentPortfolioResponse,
     HistoricalResearchRequest,
@@ -37,6 +42,8 @@ from pa_investing.core.config import Settings
 from pa_investing.core.dependencies import (
     OperationsAnalysisContext,
     PortfolioAnalysisContext,
+    get_broker_daily_nav_repository,
+    get_broker_daily_pnl_repository,
     get_historical_data_service,
     get_instrument_resolution_service,
     get_operations_analysis_context,
@@ -45,7 +52,11 @@ from pa_investing.core.dependencies import (
     get_refresh_and_sync_workflow,
     get_settings,
 )
-from pa_investing.db.repositories import PortfolioSnapshotRepository
+from pa_investing.db.repositories import (
+    BrokerDailyNavRepository,
+    BrokerDailyPnlRepository,
+    PortfolioSnapshotRepository,
+)
 from pa_investing.instruments.resolution import (
     InstrumentResolutionService,
     InstrumentSearchResult,
@@ -189,10 +200,19 @@ def indicative_daily_pnl_analysis(
         PortfolioSnapshotRepository,
         Depends(get_portfolio_snapshot_repository),
     ],
+    broker_nav_repository: Annotated[
+        BrokerDailyNavRepository,
+        Depends(get_broker_daily_nav_repository),
+    ],
     _: Annotated[None, Depends(require_analytics_auth)],
     days: int | None = 90,
 ) -> IndicativeDailyPnlResponse:
-    history = build_indicative_daily_pnl(repository.list_history(days=days))
+    broker_history = broker_nav_repository.list_history(days=days)
+    history = (
+        build_broker_daily_pnl(broker_history)
+        if broker_history
+        else build_indicative_daily_pnl(repository.list_history(days=days))
+    )
     return IndicativeDailyPnlResponse(
         reporting_currency=history.reporting_currency,
         latest_nav=_format_decimal_or_none(history.latest_nav),
@@ -213,6 +233,50 @@ def indicative_daily_pnl_analysis(
             for point in history.points
         ],
     )
+
+
+@router.get("/analysis/broker-daily-pnl", response_model=BrokerDailyPnlResponse)
+def broker_daily_pnl_analysis(
+    repository: Annotated[
+        BrokerDailyPnlRepository,
+        Depends(get_broker_daily_pnl_repository),
+    ],
+    _: Annotated[None, Depends(require_analytics_auth)],
+    days: int | None = None,
+    latest_only: bool = True,
+    limit: int = 12,
+) -> BrokerDailyPnlResponse:
+    points = (
+        repository.latest_contributors(limit=limit)
+        if latest_only
+        else repository.list_history(days=days)
+    )
+    latest_report_date = repository.latest_report_date()
+    return BrokerDailyPnlResponse(
+        latest_report_date=latest_report_date,
+        points=[
+            BrokerDailyPnlPointResponse(
+                account_id=point.account_id,
+                report_date=point.report_date,
+                provider=point.provider,
+                symbol=point.symbol,
+                asset_class=point.asset_class,
+                previous_close_quantity=_format_decimal(
+                    point.previous_close_quantity
+                ),
+                previous_close_price=_format_decimal(point.previous_close_price),
+                close_quantity=_format_decimal(point.close_quantity),
+                close_price=_format_decimal(point.close_price),
+                transaction_mtm=_format_decimal(point.transaction_mtm),
+                prior_open_mtm=_format_decimal(point.prior_open_mtm),
+                commissions=_format_decimal(point.commissions),
+                total=_format_decimal(point.total),
+            )
+            for point in points
+        ],
+    )
+
+
 @router.get("/analysis/current", response_model=CurrentPortfolioResponse)
 def current_portfolio_analysis(
     context: Annotated[
