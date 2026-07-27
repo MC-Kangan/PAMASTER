@@ -27,6 +27,10 @@ def test_compose_forwards_required_nas_provider_configuration() -> None:
 
     assert 'PA_IBKR_FLEX_TOKEN: "${PA_IBKR_FLEX_TOKEN:-}"' in compose_text
     assert 'PA_IBKR_FLEX_QUERY_ID: "${PA_IBKR_FLEX_QUERY_ID:-}"' in compose_text
+    assert (
+        'PA_IBKR_FLEX_HISTORY_QUERY_ID: "${PA_IBKR_FLEX_HISTORY_QUERY_ID:-}"'
+        in compose_text
+    )
     assert 'PA_IBKR_FLEX_BASE_URL: "${PA_IBKR_FLEX_BASE_URL:-' in compose_text
     assert 'PA_TWELVE_DATA_API_KEY: "${PA_TWELVE_DATA_API_KEY:-}"' in compose_text
     assert 'PA_WORKFLOW_API_TOKEN: "${PA_WORKFLOW_API_TOKEN:-}"' in compose_text
