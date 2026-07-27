@@ -556,6 +556,7 @@ PA_MARKET_DATA_PROVIDER=twelve_data
 PA_TWELVE_DATA_API_KEY
 PA_IBKR_FLEX_TOKEN
 PA_IBKR_FLEX_QUERY_ID
+PA_IBKR_FLEX_HISTORY_QUERY_ID
 PA_ANALYTICS_AUTH_ENABLED=true
 PA_ANALYTICS_AUTH_USERNAME
 PA_ANALYTICS_AUTH_PASSWORD
@@ -590,6 +591,9 @@ docker compose exec -T backend-api \
   python -m pa_investing.scripts.import_ibkr_positions --source flex
 
 docker compose exec -T backend-api \
+  python -m pa_investing.scripts.import_ibkr_history
+
+docker compose exec -T backend-api \
   python -m pa_investing.scripts.run_scheduled_snapshot
 
 docker compose exec -T backend-api \
@@ -599,6 +603,7 @@ docker compose exec -T backend-api \
 Expected evidence:
 
 - The IBKR command reports imported accounts, positions, transactions, and reconciliation status.
+- The IBKR history command reports broker daily NAV and P&L points.
 - The snapshot command prints a new snapshot ID.
 - `show_positions` displays the real internal instrument IDs.
 - Notion shows a Daily Review for the current Europe/London date.
@@ -617,7 +622,7 @@ separate scheduler container; UGOS Task Scheduler invokes these one-shot command
 **06:00 Europe/London — full morning cycle:**
 
 ```bash
-cd /volume1/docker/pa-investing/backend && docker compose exec -T backend-api python -m pa_investing.scripts.import_ibkr_positions --source flex && docker compose exec -T backend-api python -m pa_investing.scripts.run_scheduled_snapshot
+cd /volume1/docker/pa-investing/backend && docker compose exec -T backend-api python -m pa_investing.scripts.import_ibkr_positions --source flex && docker compose exec -T backend-api python -m pa_investing.scripts.import_ibkr_history && docker compose exec -T backend-api python -m pa_investing.scripts.run_scheduled_snapshot
 ```
 
 The morning command intentionally uses `&&`: a failed IBKR import prevents the refresh from being
@@ -677,6 +682,29 @@ docker compose build --pull
 docker compose run --rm backend-api alembic upgrade head
 docker compose up -d
 docker compose ps
+curl --fail http://127.0.0.1:8000/health
+```
+
+If the NAS does not have Git or should not build from source, build the backend image on a laptop
+and load it on the NAS instead:
+
+```bash
+cd /Users/chenkangan/Documents/PAMASTER/backend
+tag=$(git rev-parse --short HEAD)
+docker build --platform linux/amd64 -t "pa-investing-backend:${tag}" .
+docker save "pa-investing-backend:${tag}" -o "pa-investing-backend-${tag}.tar"
+```
+
+Transfer `pa-investing-backend-${tag}.tar` to the NAS. On the NAS:
+
+```bash
+docker load -i /path/to/pa-investing-backend-<tag>.tar
+cd /volume1/docker/pa-investing/backend
+export PA_BACKEND_IMAGE="pa-investing-backend:<tag>"
+docker compose -f docker-compose.prebuilt.yml config --quiet
+docker compose -f docker-compose.prebuilt.yml run --rm backend-api alembic upgrade head
+docker compose -f docker-compose.prebuilt.yml up -d
+docker compose -f docker-compose.prebuilt.yml ps
 curl --fail http://127.0.0.1:8000/health
 ```
 

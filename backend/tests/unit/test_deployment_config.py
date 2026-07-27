@@ -36,6 +36,18 @@ def test_compose_forwards_required_nas_provider_configuration() -> None:
     assert 'PA_WORKFLOW_API_TOKEN: "${PA_WORKFLOW_API_TOKEN:-}"' in compose_text
 
 
+def test_prebuilt_compose_runs_loaded_backend_image_without_build_context() -> None:
+    compose_text = (BACKEND_ROOT / "docker-compose.prebuilt.yml").read_text()
+
+    assert 'image: "${PA_BACKEND_IMAGE:?PA_BACKEND_IMAGE is required}"' in compose_text
+    assert "build:" not in compose_text
+    assert (
+        'PA_IBKR_FLEX_HISTORY_QUERY_ID: "${PA_IBKR_FLEX_HISTORY_QUERY_ID:-}"'
+        in compose_text
+    )
+    assert '${PA_BIND_ADDRESS:-127.0.0.1}:8000:8000' in compose_text
+
+
 def test_compose_has_health_checks_and_restart_policies() -> None:
     compose_text = (BACKEND_ROOT / "docker-compose.yml").read_text()
 
