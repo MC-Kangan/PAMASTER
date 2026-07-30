@@ -50,6 +50,7 @@ from pa_investing.notion.client import FakeNotionClient, NotionClient
 from pa_investing.notion.live import LiveNotionClient
 from pa_investing.notion.sync import NotionSync
 from pa_investing.workflows.daily_review import DailyReviewPersistence, DailyReviewWorkflow
+from pa_investing.workflows.full_refresh import FullRefreshWorkflow
 from pa_investing.workflows.refresh_and_sync import RefreshAndSyncWorkflow
 
 
@@ -162,6 +163,20 @@ def get_refresh_and_sync_workflow(
             notion_provider_name="notion" if settings.notion_enabled else None,
             default_base_currency=settings.default_base_currency,
         )
+
+
+def get_full_refresh_workflow(
+    refresh_and_sync_workflow: Annotated[
+        RefreshAndSyncWorkflow,
+        Depends(get_refresh_and_sync_workflow),
+    ],
+    settings: Annotated[Settings, Depends(get_settings)],
+) -> FullRefreshWorkflow:
+    return FullRefreshWorkflow(
+        settings=settings,
+        session_factory=get_database_session_factory(),
+        refresh_and_sync_workflow=refresh_and_sync_workflow,
+    )
 
 
 def get_portfolio_snapshot_repository() -> Iterator[PortfolioSnapshotRepository]:

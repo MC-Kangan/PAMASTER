@@ -22,6 +22,7 @@ def run_ibkr_import(
     session_factory: DatabaseSessionFactory | None = None,
     connector: object | None = None,
     workflow: BrokerImportWorkflow | None = None,
+    verbose: bool = True,
 ) -> BrokerImportResult:
     if workflow is None:
         resolved_settings = settings or Settings()
@@ -44,29 +45,30 @@ def run_ibkr_import(
     else:
         result = workflow.run()
 
-    print(
-        "IBKR import completed: "
-        f"accounts={result.accounts_imported} "
-        f"positions={result.positions_imported} "
-        f"closed={result.positions_closed} "
-        f"skipped={len(result.skipped_positions)} "
-        f"transactions={result.transactions_imported} "
-        f"reconciliations={result.reconciliations_imported} "
-        f"reconciliation_warnings={result.reconciliation_warnings}"
-    )
-    for skipped in result.skipped_positions:
+    if verbose:
         print(
-            f"- skipped {skipped['account_id']} {skipped['symbol']}: {skipped['reason']}"
+            "IBKR import completed: "
+            f"accounts={result.accounts_imported} "
+            f"positions={result.positions_imported} "
+            f"closed={result.positions_closed} "
+            f"skipped={len(result.skipped_positions)} "
+            f"transactions={result.transactions_imported} "
+            f"reconciliations={result.reconciliations_imported} "
+            f"reconciliation_warnings={result.reconciliation_warnings}"
         )
-    print(
-        f"Cost basis: available={result.cost_basis_available} "
-        f"missing={result.cost_basis_missing}"
-    )
-    if result.missing_cost_basis_positions:
-        for missing in result.missing_cost_basis_positions:
+        for skipped in result.skipped_positions:
             print(
-                f"- missing cost basis {missing['account_id']} {missing['symbol']}"
+                f"- skipped {skipped['account_id']} {skipped['symbol']}: {skipped['reason']}"
             )
+        print(
+            f"Cost basis: available={result.cost_basis_available} "
+            f"missing={result.cost_basis_missing}"
+        )
+        if result.missing_cost_basis_positions:
+            for missing in result.missing_cost_basis_positions:
+                print(
+                    f"- missing cost basis {missing['account_id']} {missing['symbol']}"
+                )
     return result
 
 

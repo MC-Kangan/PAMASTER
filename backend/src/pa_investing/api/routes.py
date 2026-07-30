@@ -29,9 +29,12 @@ from pa_investing.api.auth import (
 from pa_investing.api.schemas import (
     BrokerDailyPnlPointResponse,
     BrokerDailyPnlResponse,
+    BrowserRefreshResponse,
     CurrentHoldingResponse,
     CurrentPortfolioResponse,
     HistoricalResearchRequest,
+    IbkrHistoryImportResponse,
+    IbkrPositionImportResponse,
     IndicativeDailyPnlPointResponse,
     IndicativeDailyPnlResponse,
     OperationsResponse,
@@ -55,6 +58,7 @@ from pa_investing.core.dependencies import (
     PortfolioAnalysisContext,
     get_broker_daily_nav_repository,
     get_broker_daily_pnl_repository,
+    get_full_refresh_workflow,
     get_historical_data_service,
     get_instrument_resolution_service,
     get_operations_analysis_context,
@@ -80,6 +84,7 @@ from pa_investing.market_data.history.service import HistoricalDataService
 from pa_investing.notion.sync import PORTFOLIO_BASE_CURRENCY_KEY
 from pa_investing.presentation.fields import serialize_decimal
 from pa_investing.workflows.agent_api import DailyReviewResult
+from pa_investing.workflows.full_refresh import FullRefreshError, FullRefreshWorkflow
 from pa_investing.workflows.refresh_and_sync import RefreshAndSyncWorkflow
 
 router = APIRouter()
@@ -598,17 +603,47 @@ def refresh_and_sync_route(
     return _refresh_response(result, settings)
 
 
-@router.post("/analysis/refresh", response_model=RefreshAndSyncResponse)
+@router.post("/analysis/refresh", response_model=BrowserRefreshResponse)
 def browser_refresh_route(
     _: Annotated[None, Depends(require_analytics_auth)],
     _browser_request: Annotated[None, Depends(require_browser_refresh_request)],
     workflow: Annotated[
-        RefreshAndSyncWorkflow,
-        Depends(get_refresh_and_sync_workflow),
+        FullRefreshWorkflow,
+        Depends(get_full_refresh_workflow),
     ],
     settings: Annotated[Settings, Depends(get_settings)],
-) -> RefreshAndSyncResponse:
-    return _refresh_response(workflow.run(stop_prices={}), settings)
+) -> BrowserRefreshResponse:
+    try:
+        result = workflow.run()
+    except FullRefreshError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={
+                "stage": exc.stage,
+                "message": str(exc),
+            },
+        ) from exc
+
+    return BrowserRefreshResponse(
+        position_import=IbkrPositionImportResponse(
+            accounts_imported=result.position_import.accounts_imported,
+            positions_imported=result.position_import.positions_imported,
+            positions_closed=result.position_import.positions_closed,
+            skipped_positions=len(result.position_import.skipped_positions),
+            transactions_imported=result.position_import.transactions_imported,
+            reconciliations_imported=result.position_import.reconciliations_imported,
+            reconciliation_warnings=result.position_import.reconciliation_warnings,
+            cost_basis_available=result.position_import.cost_basis_available,
+            cost_basis_missing=result.position_import.cost_basis_missing,
+        ),
+        history_import=IbkrHistoryImportResponse(
+            accounts_imported=result.history_import.accounts_imported,
+            snapshots_imported=result.history_import.snapshots_imported,
+            nav_points_imported=result.history_import.nav_points_imported,
+            pnl_points_imported=result.history_import.pnl_points_imported,
+        ),
+        **_refresh_response(result.dashboard_refresh, settings).model_dump(),
+    )
 
 
 def _refresh_response(

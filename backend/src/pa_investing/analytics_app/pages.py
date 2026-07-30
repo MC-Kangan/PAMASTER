@@ -646,12 +646,27 @@ def portfolio_page() -> str:
                   let detail = `Request failed (${response.status})`;
                   try {
                     const payload = await response.json();
-                    detail = payload.detail || detail;
+                    if (payload.detail?.message) {
+                      const stage = payload.detail.stage
+                        ? `${payload.detail.stage}: `
+                        : '';
+                      detail = `${stage}${payload.detail.message}`;
+                    } else {
+                      detail = payload.detail || detail;
+                    }
                   } catch (_) {
                     // Keep the HTTP status message when the response is not JSON.
                   }
                   throw new Error(detail);
                 }
+                const refreshPayload = await response.json();
+                status.textContent = [
+                  `IBKR refreshed: ${refreshPayload.position_import.positions_imported} positions`,
+                  `${refreshPayload.position_import.transactions_imported} trades`,
+                  `${refreshPayload.history_import.nav_points_imported} NAV points`,
+                  `${refreshPayload.history_import.pnl_points_imported} P&L points.`,
+                  'Dashboard refreshed.',
+                ].join(', ');
               } catch (error) {
                 status.textContent = `Refresh failed: ${error.message}`;
                 return;
@@ -665,8 +680,6 @@ def portfolio_page() -> str:
               ]);
               if (reloadResults.some((result) => result.status === 'rejected')) {
                 status.textContent = 'Portfolio refreshed, but some panels failed to reload.';
-              } else {
-                status.textContent = 'Portfolio refreshed.';
               }
             } finally {
               button.disabled = false;

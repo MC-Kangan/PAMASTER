@@ -18,6 +18,34 @@ class RefreshAndSyncResponse(BaseModel):
     notion_sync_enabled: bool
 
 
+class IbkrPositionImportResponse(BaseModel):
+    accounts_imported: int
+    positions_imported: int
+    positions_closed: int
+    skipped_positions: int
+    transactions_imported: int
+    reconciliations_imported: int
+    reconciliation_warnings: int
+    cost_basis_available: int
+    cost_basis_missing: int
+
+
+class IbkrHistoryImportResponse(BaseModel):
+    accounts_imported: int
+    snapshots_imported: int
+    nav_points_imported: int
+    pnl_points_imported: int
+
+
+class BrowserRefreshResponse(BaseModel):
+    position_import: IbkrPositionImportResponse
+    history_import: IbkrHistoryImportResponse
+    snapshot_id: str
+    nav: str
+    signal_count: int
+    notion_sync_enabled: bool
+
+
 class PerformancePointResponse(BaseModel):
     observed_at: datetime
     nav: str

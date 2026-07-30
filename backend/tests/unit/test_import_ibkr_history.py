@@ -118,7 +118,12 @@ def test_import_ibkr_history_fetches_when_path_is_omitted(tmp_path) -> None:
 
 def test_build_history_connector_requires_history_query_id() -> None:
     with pytest.raises(RuntimeError, match="PA_IBKR_FLEX_HISTORY_QUERY_ID"):
-        _build_history_connector(Settings(ibkr_flex_token="token"))
+        _build_history_connector(
+            Settings(
+                ibkr_flex_token="token",
+                ibkr_flex_history_query_id="",
+            )
+        )
 
 
 def test_import_ibkr_history_rejects_empty_live_response() -> None:

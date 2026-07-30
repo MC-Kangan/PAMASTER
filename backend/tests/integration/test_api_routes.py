@@ -14,6 +14,7 @@ from pa_investing.core.dependencies import (
     OperationsAnalysisContext,
     get_broker_daily_nav_repository,
     get_broker_daily_pnl_repository,
+    get_full_refresh_workflow,
     get_historical_data_service,
     get_instrument_resolution_service,
     get_operations_analysis_context,
@@ -54,6 +55,12 @@ from pa_investing.market_data.history.models import (
     ProviderAttempt,
 )
 from pa_investing.workflows.agent_api import DailyReviewResult
+from pa_investing.workflows.broker_import import BrokerImportResult
+from pa_investing.workflows.full_refresh import (
+    FullRefreshError,
+    FullRefreshResult,
+    IbkrHistoryImportResult,
+)
 
 
 class FakeRefreshAndSyncWorkflow:
@@ -104,6 +111,38 @@ class FakeRefreshAndSyncWorkflow:
                     created_at=datetime(2026, 7, 9, 16, 0, tzinfo=UTC),
                 )
             ],
+        )
+
+
+class FakeFullRefreshWorkflow:
+    def __init__(self, error: FullRefreshError | None = None) -> None:
+        self.call_count = 0
+        self.error = error
+
+    def run(self) -> FullRefreshResult:
+        self.call_count += 1
+        if self.error is not None:
+            raise self.error
+        refresh_workflow = FakeRefreshAndSyncWorkflow(expected_stop_prices={})
+        return FullRefreshResult(
+            position_import=BrokerImportResult(
+                accounts_imported=1,
+                positions_imported=8,
+                positions_closed=2,
+                skipped_positions=[{"symbol": "OPT", "reason": "unsupported"}],
+                cost_basis_available=7,
+                cost_basis_missing=1,
+                transactions_imported=56,
+                reconciliations_imported=1,
+                reconciliation_warnings=1,
+            ),
+            history_import=IbkrHistoryImportResult(
+                accounts_imported=1,
+                snapshots_imported=151,
+                nav_points_imported=151,
+                pnl_points_imported=1166,
+            ),
+            dashboard_refresh=refresh_workflow.run(stop_prices={}),
         )
 
 
@@ -815,8 +854,8 @@ def test_browser_refresh_route_returns_refresh_and_sync_summary() -> None:
     app.dependency_overrides[get_settings] = lambda: Settings(
         analytics_auth_enabled=False,
     )
-    workflow = FakeRefreshAndSyncWorkflow(expected_stop_prices={})
-    app.dependency_overrides[get_refresh_and_sync_workflow] = lambda: workflow
+    workflow = FakeFullRefreshWorkflow()
+    app.dependency_overrides[get_full_refresh_workflow] = lambda: workflow
 
     response = TestClient(app).post(
         "/analysis/refresh",
@@ -827,6 +866,23 @@ def test_browser_refresh_route_returns_refresh_and_sync_summary() -> None:
     assert response.status_code == 200
     assert workflow.call_count == 1
     assert response.json() == {
+        "position_import": {
+            "accounts_imported": 1,
+            "positions_imported": 8,
+            "positions_closed": 2,
+            "skipped_positions": 1,
+            "transactions_imported": 56,
+            "reconciliations_imported": 1,
+            "reconciliation_warnings": 1,
+            "cost_basis_available": 7,
+            "cost_basis_missing": 1,
+        },
+        "history_import": {
+            "accounts_imported": 1,
+            "snapshots_imported": 151,
+            "nav_points_imported": 151,
+            "pnl_points_imported": 1166,
+        },
         "snapshot_id": "snap-123",
         "nav": "1750",
         "signal_count": 1,
@@ -839,8 +895,8 @@ def test_browser_refresh_route_rejects_missing_request_marker_without_running_wo
     app.dependency_overrides[get_settings] = lambda: Settings(
         analytics_auth_enabled=False,
     )
-    workflow = FakeRefreshAndSyncWorkflow(expected_stop_prices={})
-    app.dependency_overrides[get_refresh_and_sync_workflow] = lambda: workflow
+    workflow = FakeFullRefreshWorkflow()
+    app.dependency_overrides[get_full_refresh_workflow] = lambda: workflow
 
     response = TestClient(app).post("/analysis/refresh", json={})
 
@@ -853,8 +909,8 @@ def test_browser_refresh_route_rejects_wrong_request_marker_without_running_work
     app.dependency_overrides[get_settings] = lambda: Settings(
         analytics_auth_enabled=False,
     )
-    workflow = FakeRefreshAndSyncWorkflow(expected_stop_prices={})
-    app.dependency_overrides[get_refresh_and_sync_workflow] = lambda: workflow
+    workflow = FakeFullRefreshWorkflow()
+    app.dependency_overrides[get_full_refresh_workflow] = lambda: workflow
 
     response = TestClient(app).post(
         "/analysis/refresh",
@@ -871,8 +927,8 @@ def test_browser_refresh_route_rejects_form_content_type_without_running_workflo
     app.dependency_overrides[get_settings] = lambda: Settings(
         analytics_auth_enabled=False,
     )
-    workflow = FakeRefreshAndSyncWorkflow(expected_stop_prices={})
-    app.dependency_overrides[get_refresh_and_sync_workflow] = lambda: workflow
+    workflow = FakeFullRefreshWorkflow()
+    app.dependency_overrides[get_full_refresh_workflow] = lambda: workflow
 
     response = TestClient(app).post(
         "/analysis/refresh",
@@ -891,8 +947,8 @@ def test_browser_refresh_route_rejects_foreign_origin_form_without_running_workf
         analytics_auth_username="demo",
         analytics_auth_password="secret",
     )
-    workflow = FakeRefreshAndSyncWorkflow(expected_stop_prices={})
-    app.dependency_overrides[get_refresh_and_sync_workflow] = lambda: workflow
+    workflow = FakeFullRefreshWorkflow()
+    app.dependency_overrides[get_full_refresh_workflow] = lambda: workflow
 
     response = TestClient(app).post(
         "/analysis/refresh",
@@ -912,14 +968,46 @@ def test_browser_refresh_route_rejects_missing_analytics_credentials() -> None:
         analytics_auth_username="demo",
         analytics_auth_password="secret",
     )
-    app.dependency_overrides[get_refresh_and_sync_workflow] = (
-        lambda: FakeRefreshAndSyncWorkflow(expected_stop_prices={})
-    )
+    app.dependency_overrides[get_full_refresh_workflow] = lambda: FakeFullRefreshWorkflow()
 
     response = TestClient(app).post("/analysis/refresh", json={})
 
     assert response.status_code == 401
     assert response.headers["www-authenticate"] == "Basic"
+
+
+@pytest.mark.parametrize(
+    ("stage", "message"),
+    [
+        ("ibkr_positions", "positions unavailable"),
+        ("ibkr_history", "returned no daily history rows"),
+        ("dashboard_refresh", "notion unavailable"),
+    ],
+)
+def test_browser_refresh_route_returns_stage_error(stage: str, message: str) -> None:
+    app = create_app()
+    app.dependency_overrides[get_settings] = lambda: Settings(
+        analytics_auth_enabled=False,
+    )
+    workflow = FakeFullRefreshWorkflow(
+        error=FullRefreshError(stage, RuntimeError(message))
+    )
+    app.dependency_overrides[get_full_refresh_workflow] = lambda: workflow
+
+    response = TestClient(app).post(
+        "/analysis/refresh",
+        json={},
+        headers={"X-PA-Request": "refresh"},
+    )
+
+    assert response.status_code == 503
+    assert workflow.call_count == 1
+    assert response.json() == {
+        "detail": {
+            "stage": stage,
+            "message": message,
+        }
+    }
 
 
 def test_browser_analytics_route_denies_unauthenticated_requests() -> None:
