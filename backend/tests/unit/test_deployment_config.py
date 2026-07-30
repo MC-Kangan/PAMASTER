@@ -32,6 +32,11 @@ def test_compose_forwards_required_nas_provider_configuration() -> None:
         in compose_text
     )
     assert 'PA_IBKR_FLEX_BASE_URL: "${PA_IBKR_FLEX_BASE_URL:-' in compose_text
+    assert 'PA_IBKR_FLEX_TIMEZONE: "${PA_IBKR_FLEX_TIMEZONE:-UTC}"' in compose_text
+    assert (
+        'PA_MARKET_DATA_RECONCILIATION_TOLERANCE: '
+        '"${PA_MARKET_DATA_RECONCILIATION_TOLERANCE:-0.01}"'
+    ) in compose_text
     assert 'PA_TWELVE_DATA_API_KEY: "${PA_TWELVE_DATA_API_KEY:-}"' in compose_text
     assert 'PA_WORKFLOW_API_TOKEN: "${PA_WORKFLOW_API_TOKEN:-}"' in compose_text
 
@@ -45,6 +50,7 @@ def test_prebuilt_compose_runs_loaded_backend_image_without_build_context() -> N
         'PA_IBKR_FLEX_HISTORY_QUERY_ID: "${PA_IBKR_FLEX_HISTORY_QUERY_ID:-}"'
         in compose_text
     )
+    assert 'PA_IBKR_FLEX_TIMEZONE: "${PA_IBKR_FLEX_TIMEZONE:-UTC}"' in compose_text
     assert '${PA_BIND_ADDRESS:-127.0.0.1}:8000:8000' in compose_text
 
 

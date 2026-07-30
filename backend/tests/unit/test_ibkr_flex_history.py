@@ -186,7 +186,10 @@ def test_ibkr_flex_history_converts_daily_nav_to_portfolio_snapshots() -> None:
     snapshots = history.to_portfolio_snapshots()
 
     assert len(snapshots) == 1
-    assert snapshots[0].snapshot_id == "ibkr-flex-history:U1:2026-07-24"
+    assert (
+        snapshots[0].snapshot_id
+        == "ibkr-flex-history:portfolio:GBP:2026-07-24"
+    )
     assert snapshots[0].observed_at == datetime(2026, 7, 24, tzinfo=UTC)
     assert snapshots[0].base_currency == "GBP"
     assert snapshots[0].nav == Decimal("11987.492084189")
@@ -195,3 +198,31 @@ def test_ibkr_flex_history_converts_daily_nav_to_portfolio_snapshots() -> None:
     assert snapshots[0].unrealized_pnl == Decimal("76.114135")
     assert snapshots[0].position_count == 2
     assert snapshots[0].valued_position_count == 2
+
+
+def test_ibkr_flex_history_aggregates_accounts_by_date_and_currency() -> None:
+    history = parse_ibkr_flex_history_xml(
+        """
+        <FlexQueryResponse>
+          <FlexStatements>
+            <FlexStatement accountId="U1" fromDate="20260724" toDate="20260724">
+              <ChangeInNAV accountId="U1" fromDate="20260724" toDate="20260724"
+                startingValue="1000" endingValue="1010" mtm="10"
+                realized="0" changeInUnrealized="0" depositsWithdrawals="0"
+                commissions="0" dividends="0" interest="0" currency="GBP" />
+            </FlexStatement>
+            <FlexStatement accountId="U2" fromDate="20260724" toDate="20260724">
+              <ChangeInNAV accountId="U2" fromDate="20260724" toDate="20260724"
+                startingValue="500" endingValue="505" mtm="5"
+                realized="0" changeInUnrealized="0" depositsWithdrawals="0"
+                commissions="0" dividends="0" interest="0" currency="GBP" />
+            </FlexStatement>
+          </FlexStatements>
+        </FlexQueryResponse>
+        """
+    )
+
+    snapshots = history.to_portfolio_snapshots()
+
+    assert len(snapshots) == 1
+    assert snapshots[0].nav == Decimal("1515")

@@ -4,14 +4,17 @@ from decimal import Decimal
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from pa_investing.analytics.daily_pnl import build_indicative_daily_pnl
+from pa_investing.analytics.daily_pnl import (
+    build_broker_daily_pnl,
+    build_indicative_daily_pnl,
+)
 from pa_investing.analytics.performance import (
     build_performance_history,
     latest_snapshot_per_day,
 )
 from pa_investing.db.base import Base
 from pa_investing.db.repositories import PortfolioSnapshotRepository
-from pa_investing.domain.models import PortfolioSnapshot
+from pa_investing.domain.models import BrokerDailyNav, PortfolioSnapshot
 
 
 def test_build_performance_history_calculates_peak_drawdown_and_return() -> None:
@@ -70,6 +73,31 @@ def test_latest_snapshot_per_day_keeps_last_refresh_for_each_day() -> None:
     result = latest_snapshot_per_day(snapshots)
 
     assert [snapshot.snapshot_id for snapshot in result] == ["evening", "next-day"]
+
+
+def test_latest_snapshot_per_day_prefers_valued_snapshot_for_equal_timestamp() -> None:
+    zero = _snapshot("empty-account", "2026-07-10T00:00:00+00:00", "0", "0")
+    valued = _snapshot("valued-account", "2026-07-10T00:00:00+00:00", "1000", "20")
+    valued.position_count = 2
+    valued.valued_position_count = 2
+
+    result = latest_snapshot_per_day([valued, zero])
+
+    assert [snapshot.snapshot_id for snapshot in result] == ["valued-account"]
+
+
+def test_broker_daily_pnl_aggregates_accounts_into_one_point_per_date() -> None:
+    first = _broker_nav("U1", "2026-07-10", "1000", "1010", "10")
+    empty = _broker_nav("U2", "2026-07-10", "0", "0", "0")
+    second = _broker_nav("U1", "2026-07-11", "1010", "1005", "-5")
+
+    result = build_broker_daily_pnl([first, empty, second])
+
+    assert len(result.points) == 2
+    assert result.points[0].ending_nav == Decimal("1010")
+    assert result.points[0].pnl_amount == Decimal("10")
+    assert result.latest_nav == Decimal("1005")
+    assert result.dtd_pnl_amount == Decimal("-5")
 
 
 def test_build_performance_history_handles_empty_history() -> None:
@@ -197,4 +225,28 @@ def _snapshot(snapshot_id: str, observed_at: str, nav: str, pnl: str) -> Portfol
         gross_exposure=nav_decimal,
         net_exposure=nav_decimal,
         unrealized_pnl=Decimal(pnl),
+    )
+
+
+def _broker_nav(
+    account_id: str,
+    report_date: str,
+    starting_value: str,
+    ending_value: str,
+    mtm: str,
+) -> BrokerDailyNav:
+    return BrokerDailyNav(
+        account_id=account_id,
+        report_date=date.fromisoformat(report_date),
+        provider="ibkr-flex",
+        currency="GBP",
+        starting_value=Decimal(starting_value),
+        ending_value=Decimal(ending_value),
+        mtm=Decimal(mtm),
+        realized=Decimal("0"),
+        change_in_unrealized=Decimal("0"),
+        deposits_withdrawals=Decimal("0"),
+        commissions=Decimal("0"),
+        dividends=Decimal("0"),
+        interest=Decimal("0"),
     )

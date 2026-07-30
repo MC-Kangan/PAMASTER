@@ -55,10 +55,18 @@ def test_run_ibkr_import_uses_flex_connector_when_flex_credentials_are_configure
             raise AssertionError("session factory should not be used by this test")
 
     class StubIbkrFlexConnector:
-        def __init__(self, *, token: str, query_id: str, base_url: str) -> None:
+        def __init__(
+            self,
+            *,
+            token: str,
+            query_id: str,
+            base_url: str,
+            report_timezone: str,
+        ) -> None:
             self.token = token
             self.query_id = query_id
             self.base_url = base_url
+            self.report_timezone = report_timezone
 
     class StubBrokerImportWorkflow:
         def __init__(
@@ -149,4 +157,5 @@ def test_run_ibkr_import_uses_flex_connector_when_flex_credentials_are_configure
     assert isinstance(captured_connector, StubIbkrFlexConnector)
     assert captured_connector.token == "test-token"
     assert captured_connector.query_id == "12345"
+    assert captured_connector.report_timezone == "UTC"
     assert captured_connector.base_url == "https://flex.example"

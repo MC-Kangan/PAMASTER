@@ -1,3 +1,6 @@
+from decimal import Decimal
+
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -23,6 +26,12 @@ class Settings(BaseSettings):
     ibkr_flex_token: str = ""
     ibkr_flex_query_id: str = ""
     ibkr_flex_history_query_id: str = ""
+    ibkr_flex_timezone: str = "UTC"
+    market_data_reconciliation_tolerance: Decimal = Field(
+        default=Decimal("0.01"),
+        ge=Decimal("0"),
+        le=Decimal("0.20"),
+    )
     llm_provider: str = "mock"
     openai_api_key: str = ""
     default_base_currency: str = "USD"

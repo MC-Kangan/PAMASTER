@@ -130,6 +130,8 @@ PA_POSTGRES_PASSWORD=<long unique password>
 PA_IBKR_FLEX_TOKEN=<IBKR Flex token>
 PA_IBKR_FLEX_QUERY_ID=<current positions Flex Query ID>
 PA_IBKR_FLEX_HISTORY_QUERY_ID=1583705
+PA_IBKR_FLEX_TIMEZONE=Europe/London
+PA_MARKET_DATA_RECONCILIATION_TOLERANCE=0.01
 
 PA_ANALYTICS_AUTH_ENABLED=true
 PA_ANALYTICS_AUTH_USERNAME=<dashboard username>
@@ -437,4 +439,3 @@ backend/*.db
 backend/backups/
 raw IBKR XML containing account data
 ```
-

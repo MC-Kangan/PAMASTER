@@ -101,6 +101,7 @@ def _build_ibkr_connector(settings: Settings) -> object:
             token=settings.ibkr_flex_token,
             query_id=settings.ibkr_flex_query_id,
             base_url=settings.ibkr_flex_base_url,
+            report_timezone=settings.ibkr_flex_timezone,
         )
     return IbkrClientPortalConnector(base_url=settings.ibkr_gateway_base_url)
 

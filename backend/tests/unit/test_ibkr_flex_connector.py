@@ -1,3 +1,4 @@
+from datetime import UTC, datetime
 from decimal import Decimal
 from xml.etree import ElementTree
 
@@ -286,7 +287,11 @@ def test_ibkr_flex_connector_reconstructs_average_cost_from_matching_trades() ->
 
 
 def test_ibkr_flex_connector_maps_trade_ledger_and_reconciles_daily_nav() -> None:
-    connector = IbkrFlexConnector(token="test-token", query_id="12345")
+    connector = IbkrFlexConnector(
+        token="test-token",
+        query_id="12345",
+        report_timezone="Europe/London",
+    )
     connector._statement_root = ElementTree.fromstring(
         """
         <FlexQueryResponse>
@@ -352,6 +357,14 @@ def test_ibkr_flex_connector_maps_trade_ledger_and_reconciles_daily_nav() -> Non
     assert transactions[0].gross_amount == Decimal("-861")
     assert transactions[0].fees == Decimal("-1")
     assert transactions[0].net_cash == Decimal("-862")
+    assert transactions[0].occurred_at == datetime(
+        2026,
+        7,
+        10,
+        14,
+        30,
+        tzinfo=UTC,
+    )
     assert transactions[0].instrument is not None
     assert transactions[0].instrument.symbol == "SPGI"
 

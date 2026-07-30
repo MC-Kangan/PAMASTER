@@ -1,8 +1,8 @@
 from datetime import UTC, date, datetime
 from decimal import Decimal
-from typing import Annotated
+from typing import Annotated, Literal
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import HTMLResponse
 
 from pa_investing.analytics.daily_pnl import (
@@ -13,9 +13,14 @@ from pa_investing.analytics.performance import (
     build_performance_history,
     latest_snapshot_per_day,
 )
+from pa_investing.analytics.position_chart import PositionChartService
 from pa_investing.analytics.snapshots import build_portfolio_snapshot
 from pa_investing.analytics.valuation import apply_reporting_currency
-from pa_investing.analytics_app.pages import portfolio_page, signal_page
+from pa_investing.analytics_app.pages import (
+    portfolio_page,
+    position_chart_page,
+    signal_page,
+)
 from pa_investing.api.auth import (
     require_analytics_auth,
     require_browser_refresh_request,
@@ -32,6 +37,12 @@ from pa_investing.api.schemas import (
     OperationsResponse,
     PerformanceHistoryResponse,
     PerformancePointResponse,
+    PositionChartCandleResponse,
+    PositionChartExecutionResponse,
+    PositionChartIndicatorsResponse,
+    PositionChartPositionResponse,
+    PositionChartReconciliationResponse,
+    PositionChartResponse,
     ProviderRunResponse,
     ReconciliationResponse,
     RefreshAndSyncRequest,
@@ -49,6 +60,7 @@ from pa_investing.core.dependencies import (
     get_operations_analysis_context,
     get_portfolio_analysis_context,
     get_portfolio_snapshot_repository,
+    get_position_chart_service,
     get_refresh_and_sync_workflow,
     get_settings,
 )
@@ -57,6 +69,7 @@ from pa_investing.db.repositories import (
     BrokerDailyPnlRepository,
     PortfolioSnapshotRepository,
 )
+from pa_investing.domain.enums import CostBasisStatus
 from pa_investing.instruments.resolution import (
     InstrumentResolutionService,
     InstrumentSearchResult,
@@ -153,6 +166,149 @@ def portfolio_analysis(
     return portfolio_page()
 
 
+@router.get("/analysis/position-chart", response_class=HTMLResponse)
+def position_chart_analysis(
+    _: Annotated[None, Depends(require_analytics_auth)],
+) -> str:
+    return position_chart_page()
+
+
+@router.get(
+    "/analysis/position-chart/positions",
+    response_model=list[PositionChartPositionResponse],
+)
+def position_chart_positions(
+    service: Annotated[
+        PositionChartService,
+        Depends(get_position_chart_service),
+    ],
+    _: Annotated[None, Depends(require_analytics_auth)],
+) -> list[PositionChartPositionResponse]:
+    return [
+        PositionChartPositionResponse(
+            account_id=position.account_id,
+            instrument_id=position.instrument.instrument_id or "",
+            symbol=position.instrument.symbol,
+            name=position.instrument.name,
+            currency=position.instrument.currency,
+            exchange=position.instrument.venue,
+            status="closed" if position.quantity == 0 else "open",
+            quantity=_format_decimal(position.quantity),
+            average_cost=_format_decimal_or_none(
+                None
+                if (
+                    position.broker_cost_basis_status or position.cost_basis_status
+                )
+                is CostBasisStatus.UNAVAILABLE
+                else position.broker_average_cost
+            ),
+        )
+        for position in service.list_positions()
+        if position.instrument.instrument_id is not None
+    ]
+
+
+@router.get(
+    "/analysis/position-chart/data/{instrument_id}",
+    response_model=PositionChartResponse,
+)
+def position_chart_data(
+    instrument_id: str,
+    account_id: str,
+    service: Annotated[
+        PositionChartService,
+        Depends(get_position_chart_service),
+    ],
+    _: Annotated[None, Depends(require_analytics_auth)],
+    interval: Literal["5m", "1d", "1wk", "1mo"] = "1d",
+    chart_range: Annotated[
+        Literal["1d", "1m", "3m", "ytd", "1y"],
+        Query(alias="range"),
+    ] = "3m",
+) -> PositionChartResponse:
+    try:
+        result = service.build(
+            account_id=account_id,
+            instrument_id=instrument_id,
+            interval=interval,
+            chart_range=chart_range,
+        )
+    except KeyError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(exc),
+        ) from exc
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=str(exc),
+        ) from exc
+    counts = {"matched": 0, "near": 0, "warning": 0, "unavailable": 0}
+    for execution in result.executions:
+        counts[execution.status] += 1
+    return PositionChartResponse(
+        account_id=result.account_id,
+        instrument_id=result.instrument_id,
+        symbol=result.symbol,
+        name=result.name,
+        currency=result.currency,
+        exchange=result.exchange,
+        position_status=result.position_status,
+        quantity=_format_decimal(result.quantity),
+        average_cost=_format_decimal_or_none(result.average_cost),
+        latest_price=_format_decimal_or_none(result.latest_price),
+        indicative_unrealized_pnl=_format_decimal_or_none(
+            result.indicative_unrealized_pnl
+        ),
+        requested_interval=result.requested_interval,
+        actual_interval=result.actual_interval,
+        requested_range=result.requested_range,
+        provider=result.provider,
+        provider_symbol=result.provider_symbol,
+        provider_exchange=result.provider_exchange,
+        provider_currency=result.provider_currency,
+        price_multiplier=_format_decimal(result.price_multiplier),
+        timezone=result.timezone,
+        fallback=result.fallback,
+        warnings=list(result.warnings),
+        reconciliation=PositionChartReconciliationResponse(**counts),
+        candles=[
+            PositionChartCandleResponse(
+                observed_at=candle.observed_at,
+                open=_format_decimal(candle.open),
+                high=_format_decimal(candle.high),
+                low=_format_decimal(candle.low),
+                close=_format_decimal(candle.close),
+                volume=_format_decimal_or_none(candle.volume),
+                split_ratio=_format_decimal(candle.split_ratio),
+            )
+            for candle in result.candles
+        ],
+        executions=[
+            PositionChartExecutionResponse(
+                transaction_id=execution.transaction_id,
+                occurred_at=execution.occurred_at,
+                side=execution.side,
+                quantity=_format_decimal(execution.quantity),
+                price=_format_decimal(execution.price),
+                fees=_format_decimal(execution.fees),
+                status=execution.status,
+                difference_percent=_format_decimal_or_none(
+                    execution.difference_percent
+                ),
+                reason=execution.reason,
+            )
+            for execution in result.executions
+        ],
+        indicators=PositionChartIndicatorsResponse(
+            sma20=[
+                _format_decimal_or_none(value)
+                for value in result.sma20
+            ]
+        ),
+    )
+
+
 @router.get("/analysis/signal/{signal_id}", response_class=HTMLResponse)
 def signal_analysis(
     signal_id: str,
@@ -208,11 +364,28 @@ def indicative_daily_pnl_analysis(
     days: int | None = 90,
 ) -> IndicativeDailyPnlResponse:
     broker_history = broker_nav_repository.list_history(days=days)
+    snapshots = repository.list_history(days=days)
     history = (
         build_broker_daily_pnl(broker_history)
         if broker_history
-        else build_indicative_daily_pnl(repository.list_history(days=days))
+        else build_indicative_daily_pnl(snapshots)
     )
+    if broker_history and snapshots:
+        latest_snapshot = max(
+            snapshots,
+            key=lambda snapshot: snapshot.observed_at,
+        )
+        if (
+            history.latest_observed_at is None
+            or latest_snapshot.observed_at > history.latest_observed_at
+        ):
+            history = history.model_copy(
+                update={
+                    "reporting_currency": latest_snapshot.base_currency,
+                    "latest_nav": latest_snapshot.nav,
+                    "latest_observed_at": latest_snapshot.observed_at,
+                }
+            )
     return IndicativeDailyPnlResponse(
         reporting_currency=history.reporting_currency,
         latest_nav=_format_decimal_or_none(history.latest_nav),

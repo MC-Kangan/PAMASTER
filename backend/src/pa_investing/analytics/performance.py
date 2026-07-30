@@ -78,6 +78,22 @@ def latest_snapshot_per_day(
     snapshots: list[PortfolioSnapshot],
 ) -> list[PortfolioSnapshot]:
     latest: dict[tuple[date, str], PortfolioSnapshot] = {}
-    for snapshot in sorted(snapshots, key=lambda item: item.observed_at):
-        latest[(snapshot.observed_at.date(), snapshot.base_currency)] = snapshot
+    for snapshot in snapshots:
+        key = (snapshot.observed_at.date(), snapshot.base_currency)
+        current = latest.get(key)
+        if current is None or _snapshot_preference(snapshot) > _snapshot_preference(
+            current
+        ):
+            latest[key] = snapshot
     return sorted(latest.values(), key=lambda item: item.observed_at)
+
+
+def _snapshot_preference(
+    snapshot: PortfolioSnapshot,
+) -> tuple[datetime, int, int, Decimal]:
+    return (
+        snapshot.observed_at,
+        snapshot.valued_position_count,
+        snapshot.position_count,
+        abs(snapshot.nav),
+    )

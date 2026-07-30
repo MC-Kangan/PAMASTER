@@ -125,44 +125,63 @@ class IbkrFlexHistory:
         return tuple(seen.values())
 
     def to_portfolio_snapshots(self) -> tuple[PortfolioSnapshot, ...]:
-        snapshots: list[PortfolioSnapshot] = []
+        grouped: dict[tuple[date, str], list[IbkrFlexDailyStatement]] = {}
         for statement in self.statements:
             if statement.nav is None:
                 continue
+            grouped.setdefault(
+                (statement.report_date, statement.nav.currency),
+                [],
+            ).append(statement)
+
+        snapshots: list[PortfolioSnapshot] = []
+        for (report_date, currency), statements in sorted(grouped.items()):
+            positions = [
+                position
+                for statement in statements
+                for position in statement.positions
+            ]
             gross_exposure = sum(
                 abs(position.position_value_in_base)
-                for position in statement.positions
+                for position in positions
             )
             net_exposure = sum(
                 position.position_value_in_base
-                for position in statement.positions
+                for position in positions
             )
             unrealized_pnl = sum(
                 position.fifo_unrealized_pnl
-                for position in statement.positions
+                for position in positions
             )
             observed_at = datetime.combine(
-                statement.report_date,
+                report_date,
                 datetime.min.time(),
                 tzinfo=UTC,
             )
             snapshots.append(
                 PortfolioSnapshot(
                     snapshot_id=(
-                        f"ibkr-flex-history:{statement.account_id}:"
-                        f"{statement.report_date.isoformat()}"
+                        f"ibkr-flex-history:portfolio:{currency}:"
+                        f"{report_date.isoformat()}"
                     ),
                     observed_at=observed_at,
-                    base_currency=statement.nav.currency,
-                    nav=statement.nav.ending_value,
+                    base_currency=currency,
+                    nav=sum(
+                        (
+                            statement.nav.ending_value
+                            for statement in statements
+                            if statement.nav is not None
+                        ),
+                        Decimal("0"),
+                    ),
                     gross_exposure=gross_exposure,
                     net_exposure=net_exposure,
                     unrealized_pnl=unrealized_pnl,
-                    position_count=len(statement.positions),
+                    position_count=len(positions),
                     valued_position_count=len(
                         [
                             position
-                            for position in statement.positions
+                            for position in positions
                             if position.position_value_in_base != 0
                         ]
                     ),

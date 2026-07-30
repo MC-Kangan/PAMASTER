@@ -5,6 +5,10 @@ from typing import Annotated
 
 from fastapi import Depends
 
+from pa_investing.analytics.position_chart import (
+    PositionChartService,
+    YahooChartDataProvider,
+)
 from pa_investing.core.config import Settings
 from pa_investing.db.repositories import (
     AccountRepository,
@@ -232,4 +236,17 @@ def get_historical_data_service() -> Iterator[HistoricalDataService]:
             repository=repository,
             resolver=resolver,
             router=router,
+        )
+
+
+def get_position_chart_service() -> Iterator[PositionChartService]:
+    session_factory = get_database_session_factory()
+    settings = get_settings()
+    with session_factory.session() as session:
+        yield PositionChartService(
+            positions=PositionRepository(session),
+            transactions=TransactionRepository(session),
+            resolver=InstrumentResolutionService(session=session),
+            market_data=YahooChartDataProvider(),
+            tolerance=settings.market_data_reconciliation_tolerance,
         )

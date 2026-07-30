@@ -3,6 +3,7 @@ from datetime import UTC, datetime
 from decimal import Decimal
 from time import sleep
 from xml.etree import ElementTree
+from zoneinfo import ZoneInfo
 
 import httpx
 
@@ -67,6 +68,7 @@ class IbkrFlexConnector(BrokerConnector):
         user_agent: str = DEFAULT_IBKR_FLEX_USER_AGENT,
         statement_retries: int = 3,
         retry_delay_seconds: float = 1.0,
+        report_timezone: str = "UTC",
     ) -> None:
         self.token = token
         self.query_id = query_id
@@ -76,6 +78,12 @@ class IbkrFlexConnector(BrokerConnector):
         self.user_agent = user_agent
         self.statement_retries = statement_retries
         self.retry_delay_seconds = retry_delay_seconds
+        try:
+            self.report_timezone = ZoneInfo(report_timezone)
+        except Exception as exc:
+            raise ValueError(
+                f"invalid IBKR Flex report timezone: {report_timezone}"
+            ) from exc
         self.last_skipped_positions: list[dict[str, str]] = []
         self._statement_root: ElementTree.Element | None = None
         self._client: httpx.Client | None = None
@@ -235,7 +243,10 @@ class IbkrFlexConnector(BrokerConnector):
                     account_id=account_id,
                     provider="ibkr-flex",
                     external_id=external_id,
-                    occurred_at=_parse_flex_datetime(node),
+                    occurred_at=_parse_flex_datetime(
+                        node,
+                        self.report_timezone,
+                    ),
                     transaction_type=transaction_type,
                     currency=_first_attr(node, "currency", default="USD"),
                     symbol=symbol,
@@ -443,11 +454,18 @@ def _parse_flex_date(value: str) -> datetime:
     return datetime.strptime(value, "%Y%m%d").replace(tzinfo=UTC)
 
 
-def _parse_flex_datetime(node: ElementTree.Element) -> datetime:
+def _parse_flex_datetime(
+    node: ElementTree.Element,
+    report_timezone: ZoneInfo,
+) -> datetime:
     value = _first_attr(node, "dateTime", "tradeDate", "reportDate")
     for pattern in ("%Y%m%d;%H%M%S", "%Y%m%d"):
         try:
-            return datetime.strptime(value, pattern).replace(tzinfo=UTC)
+            return (
+                datetime.strptime(value, pattern)
+                .replace(tzinfo=report_timezone)
+                .astimezone(UTC)
+            )
         except ValueError:
             continue
     raise ValueError(f"unsupported IBKR Flex date/time: {value}")

@@ -1,5 +1,6 @@
 from datetime import date, datetime
 from decimal import Decimal
+from typing import Literal
 
 from pydantic import BaseModel
 
@@ -150,3 +151,77 @@ class HistoricalResearchRequest(BaseModel):
     start_date: date
     end_date: date
     allow_stale: bool = False
+
+
+class PositionChartPositionResponse(BaseModel):
+    account_id: str
+    instrument_id: str
+    symbol: str
+    name: str
+    currency: str
+    exchange: str | None
+    status: Literal["open", "closed"]
+    quantity: str
+    average_cost: str | None
+
+
+class PositionChartCandleResponse(BaseModel):
+    observed_at: datetime
+    open: str
+    high: str
+    low: str
+    close: str
+    volume: str | None
+    split_ratio: str
+
+
+class PositionChartExecutionResponse(BaseModel):
+    transaction_id: str
+    occurred_at: datetime
+    side: str
+    quantity: str
+    price: str
+    fees: str
+    status: str
+    difference_percent: str | None
+    reason: str
+
+
+class PositionChartReconciliationResponse(BaseModel):
+    matched: int
+    near: int
+    warning: int
+    unavailable: int
+
+
+class PositionChartIndicatorsResponse(BaseModel):
+    sma20: list[str | None]
+
+
+class PositionChartResponse(BaseModel):
+    account_id: str
+    instrument_id: str
+    symbol: str
+    name: str
+    currency: str
+    exchange: str | None
+    position_status: Literal["open", "closed"]
+    quantity: str
+    average_cost: str | None
+    latest_price: str | None
+    indicative_unrealized_pnl: str | None
+    requested_interval: str
+    actual_interval: str | None
+    requested_range: str
+    provider: str | None
+    provider_symbol: str | None
+    provider_exchange: str | None
+    provider_currency: str | None
+    price_multiplier: str
+    timezone: str
+    fallback: bool
+    warnings: list[str]
+    reconciliation: PositionChartReconciliationResponse
+    candles: list[PositionChartCandleResponse]
+    executions: list[PositionChartExecutionResponse]
+    indicators: PositionChartIndicatorsResponse

@@ -436,6 +436,7 @@ Open the browser analytics page at:
 
 ```text
 http://localhost:8000/analysis/portfolio
+http://localhost:8000/analysis/position-chart
 ```
 
 The browser surface is intended for both computer and smartphone browsers. It renders headline
@@ -443,6 +444,14 @@ NAV and indicative daily P&L cards, a daily P&L calendar, a current position-all
 historical NAV line chart, and the daily performance table. Headline returns use the latest
 snapshot from each calendar day so the four intraday scheduled snapshots do not create artificial
 daily-return observations.
+
+The Position Chart tab renders one open position at a time with Yahoo candles, authoritative IBKR
+execution markers, broker average cost, optional SMA20 and volume, and a trade-price
+reconciliation banner. Configure `PA_IBKR_FLEX_TIMEZONE` to match the timezone selected in the
+Flex query (for example, `Europe/London`) so executions align with candles. The default
+`PA_MARKET_DATA_RECONCILIATION_TOLERANCE=0.01` permits a one-percent near-match before showing a
+warning. Provider price multipliers remain the explicit control for GBP/GBp and similar unit
+normalization.
 
 The Notion free plan permits only one native chart for the workspace and the available chart slot
 is already consumed. Notion remains the compact operating dashboard; richer and interactive charts
@@ -557,6 +566,8 @@ PA_TWELVE_DATA_API_KEY
 PA_IBKR_FLEX_TOKEN
 PA_IBKR_FLEX_QUERY_ID
 PA_IBKR_FLEX_HISTORY_QUERY_ID
+PA_IBKR_FLEX_TIMEZONE=Europe/London
+PA_MARKET_DATA_RECONCILIATION_TOLERANCE=0.01
 PA_ANALYTICS_AUTH_ENABLED=true
 PA_ANALYTICS_AUTH_USERNAME
 PA_ANALYTICS_AUTH_PASSWORD

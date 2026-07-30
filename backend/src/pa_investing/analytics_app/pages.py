@@ -71,6 +71,14 @@ def portfolio_page() -> str:
             font-weight: 600;
             text-decoration: none;
           }
+          .nav-tabs {
+            display: flex;
+            gap: 18px;
+          }
+          .tab:not([aria-current="page"]) {
+            border-bottom-color: transparent;
+            color: #64748b;
+          }
           .refresh-controls {
             display: flex;
             align-items: center;
@@ -363,8 +371,11 @@ def portfolio_page() -> str:
       <body>
         <main>
               <nav class="top-nav" aria-label="Portfolio sections">
-                <a class="tab" id="portfolio-tab" href="/analysis/portfolio"
-                   aria-current="page">Portfolio</a>
+                <div class="nav-tabs">
+                  <a class="tab" id="portfolio-tab" href="/analysis/portfolio"
+                     aria-current="page">Portfolio</a>
+                  <a class="tab" href="/analysis/position-chart">Position Chart</a>
+                </div>
                 <div class="refresh-controls">
                   <span class="refresh-status" id="refresh-status"
                         aria-live="polite"></span>
@@ -849,6 +860,706 @@ def portfolio_page() -> str:
         .replace("__COLUMN_COUNT__", str(len(PERFORMANCE_POINT_FIELDS)))
         .replace("__FIELD_CONFIG__", field_config)
     )
+
+
+def position_chart_page() -> str:
+    return """
+    <html>
+      <head>
+        <title>Position Chart</title>
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
+        <style>
+          :root {
+            color-scheme: light;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+          }
+          * { box-sizing: border-box; }
+          body {
+            margin: 0;
+            background: #f5f7fb;
+            color: #111827;
+          }
+          main {
+            max-width: 1180px;
+            margin: 0 auto;
+            padding: 16px 12px 48px;
+          }
+          h1, h2, p { margin: 0; }
+          .top-nav {
+            display: flex;
+            gap: 18px;
+            margin-bottom: 24px;
+            border-bottom: 1px solid #dbe4f0;
+          }
+          .tab {
+            color: #64748b;
+            border-bottom: 3px solid transparent;
+            padding: 10px 4px 9px;
+            font-weight: 650;
+            text-decoration: none;
+          }
+          .tab[aria-current="page"] {
+            color: #1d4ed8;
+            border-bottom-color: #2563eb;
+          }
+          .intro {
+            display: grid;
+            gap: 7px;
+            margin-bottom: 16px;
+          }
+          .subtitle { color: #64748b; font-size: 14px; }
+          .panel {
+            background: #ffffff;
+            border: 1px solid #dbe4f0;
+            border-radius: 10px;
+            padding: 14px;
+          }
+          .controls {
+            display: grid;
+            gap: 14px;
+            margin-bottom: 14px;
+          }
+          .control-row {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: end;
+            gap: 12px;
+          }
+          label {
+            display: grid;
+            gap: 6px;
+            color: #475569;
+            font-size: 12px;
+            font-weight: 650;
+          }
+          select {
+            min-height: 40px;
+            max-width: 100%;
+            border: 1px solid #cbd5e1;
+            border-radius: 7px;
+            background: #ffffff;
+            color: #111827;
+            font: inherit;
+            padding: 8px 34px 8px 10px;
+          }
+          #position-select { min-width: min(100%, 320px); }
+          .button-group {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+          }
+          .choice {
+            min-height: 36px;
+            border: 1px solid #cbd5e1;
+            border-radius: 7px;
+            background: #ffffff;
+            color: #334155;
+            cursor: pointer;
+            font: inherit;
+            font-size: 13px;
+            font-weight: 650;
+            padding: 7px 11px;
+          }
+          .choice.active {
+            border-color: #2563eb;
+            background: #eff6ff;
+            color: #1d4ed8;
+          }
+          .choice:disabled {
+            cursor: not-allowed;
+            opacity: .42;
+          }
+          .indicator-menu {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 12px;
+            min-height: 40px;
+            align-items: center;
+          }
+          .indicator-menu label {
+            display: flex;
+            flex-direction: row;
+            align-items: center;
+            gap: 6px;
+            color: #334155;
+            font-weight: 550;
+          }
+          .kpis {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 8px;
+            margin-bottom: 14px;
+          }
+          .kpi {
+            min-width: 0;
+            background: #ffffff;
+            border: 1px solid #dbe4f0;
+            border-radius: 9px;
+            padding: 12px;
+          }
+          .kpi-label { color: #64748b; font-size: 12px; margin-bottom: 5px; }
+          .kpi-value {
+            font-size: clamp(17px, 4.5vw, 24px);
+            font-weight: 680;
+            font-variant-numeric: tabular-nums;
+            overflow-wrap: anywhere;
+          }
+          .status-line {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: 8px;
+          }
+          .badge {
+            border-radius: 999px;
+            background: #e0e7ff;
+            color: #3730a3;
+            font-size: 12px;
+            font-weight: 650;
+            padding: 5px 9px;
+          }
+          .reconciliation {
+            border-radius: 8px;
+            background: #ecfdf5;
+            border: 1px solid #86efac;
+            color: #166534;
+            font-size: 13px;
+            padding: 10px 12px;
+          }
+          .reconciliation.warning {
+            background: #fffbeb;
+            border-color: #fcd34d;
+            color: #92400e;
+          }
+          .warnings {
+            display: grid;
+            gap: 6px;
+            margin: 10px 0 0;
+            padding: 0;
+            list-style: none;
+          }
+          .warnings li {
+            border-left: 3px solid #f59e0b;
+            background: #fffbeb;
+            color: #92400e;
+            font-size: 12px;
+            padding: 7px 9px;
+          }
+          .chart-shell {
+            margin-top: 14px;
+            min-height: 510px;
+          }
+          #position-chart { width: 100%; min-height: 500px; }
+          .empty {
+            min-height: 420px;
+            display: grid;
+            place-items: center;
+            color: #64748b;
+            text-align: center;
+            padding: 30px;
+          }
+          .loading { opacity: .65; }
+          @media (min-width: 760px) {
+            main { padding: 24px 16px 48px; }
+            .controls { grid-template-columns: minmax(260px, 1.4fr) 1fr 1fr 1fr; }
+            .kpis { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+          }
+        </style>
+      </head>
+      <body>
+        <main>
+          <nav class="top-nav" aria-label="Portfolio sections">
+            <a class="tab" href="/analysis/portfolio">Portfolio</a>
+            <a class="tab" href="/analysis/position-chart"
+               aria-current="page">Position Chart</a>
+          </nav>
+          <section class="intro">
+            <h1>Position Chart</h1>
+            <p class="subtitle">
+              Third-party candles reconciled against authoritative IBKR executions
+            </p>
+          </section>
+          <section class="panel controls" aria-label="Chart controls">
+            <label>
+              Position
+              <select id="position-select" aria-label="Position">
+                <option value="">Loading positions...</option>
+              </select>
+            </label>
+            <div>
+              <label>Candle interval</label>
+              <div class="button-group" id="interval-buttons">
+                <button class="choice" data-value="5m" type="button">5m</button>
+                <button class="choice active" data-value="1d" type="button">1D</button>
+                <button class="choice" data-value="1wk" type="button">1W</button>
+                <button class="choice" data-value="1mo" type="button">1M</button>
+              </div>
+            </div>
+            <div>
+              <label>Visible range</label>
+              <div class="button-group" id="range-buttons">
+                <button class="choice" data-value="1d" type="button">1D</button>
+                <button class="choice" data-value="1m" type="button">1M</button>
+                <button class="choice active" data-value="3m" type="button">3M</button>
+                <button class="choice" data-value="ytd" type="button">YTD</button>
+                <button class="choice" data-value="1y" type="button">1Y</button>
+              </div>
+            </div>
+            <div>
+              <label>Indicators</label>
+              <div class="indicator-menu">
+                <label><input id="indicator-sma" type="checkbox" /> SMA 20</label>
+                <label><input id="indicator-volume" type="checkbox" /> Volume</label>
+              </div>
+            </div>
+          </section>
+          <section class="kpis" aria-label="Selected position summary">
+            <article class="kpi">
+              <div class="kpi-label">Quantity</div>
+              <div class="kpi-value" id="quantity">--</div>
+            </article>
+            <article class="kpi">
+              <div class="kpi-label">IBKR average cost</div>
+              <div class="kpi-value" id="average-cost">--</div>
+            </article>
+            <article class="kpi">
+              <div class="kpi-label">Latest chart price</div>
+              <div class="kpi-value" id="latest-price">--</div>
+            </article>
+            <article class="kpi">
+              <div class="kpi-label">Indicative unrealized P&amp;L</div>
+              <div class="kpi-value" id="indicative-pnl">--</div>
+            </article>
+          </section>
+          <section class="panel">
+            <div class="status-line">
+              <span class="badge" id="source-badge">Waiting for data</span>
+              <span class="subtitle" id="instrument-label"></span>
+            </div>
+            <div class="reconciliation" id="reconciliation" aria-live="polite">
+              Select a position to reconcile its executions.
+            </div>
+            <ul class="warnings" id="warnings"></ul>
+            <div class="chart-shell" id="chart-shell">
+              <div class="empty">Loading chart...</div>
+            </div>
+          </section>
+        </main>
+        <script>
+          const state = {
+            interval: '1d',
+            range: '3m',
+            payload: null,
+          };
+
+          const numberFormat = new Intl.NumberFormat(undefined, {
+            maximumFractionDigits: 4,
+          });
+
+          function numeric(value) {
+            if (value === null || value === undefined || value === '') return null;
+            const parsed = Number(value);
+            return Number.isFinite(parsed) ? parsed : null;
+          }
+
+          function formatNumber(value) {
+            const parsed = numeric(value);
+            return parsed === null ? '--' : numberFormat.format(parsed);
+          }
+
+          function formatMoney(value, currency) {
+            const parsed = numeric(value);
+            if (parsed === null) return '--';
+            try {
+              return new Intl.NumberFormat(undefined, {
+                style: 'currency',
+                currency,
+                maximumFractionDigits: 2,
+              }).format(parsed);
+            } catch (_) {
+              return `${numberFormat.format(parsed)} ${currency || ''}`.trim();
+            }
+          }
+
+          function selectedPosition() {
+            const option = document.getElementById('position-select').selectedOptions[0];
+            if (!option || !option.value) return null;
+            return {
+              instrumentId: option.value,
+              accountId: option.dataset.accountId,
+              status: option.dataset.status,
+            };
+          }
+
+          function updateCompatibility() {
+            const rangeButtons = [...document.querySelectorAll('#range-buttons .choice')];
+            for (const button of rangeButtons) {
+              const incompatible = state.interval === '5m'
+                && !['1d', '1m'].includes(button.dataset.value);
+              button.disabled = incompatible;
+            }
+            if (state.interval === '5m' && !['1d', '1m'].includes(state.range)) {
+              state.range = '1m';
+            }
+            syncButtons();
+          }
+
+          function syncButtons() {
+            for (const button of document.querySelectorAll('#interval-buttons .choice')) {
+              button.classList.toggle('active', button.dataset.value === state.interval);
+            }
+            for (const button of document.querySelectorAll('#range-buttons .choice')) {
+              button.classList.toggle('active', button.dataset.value === state.range);
+            }
+          }
+
+          async function loadPositions() {
+            const response = await fetch('/analysis/position-chart/positions');
+            if (!response.ok) throw new Error(`Position request failed (${response.status})`);
+            const positions = await response.json();
+            const select = document.getElementById('position-select');
+            select.innerHTML = '';
+            if (!positions.length) {
+              const option = document.createElement('option');
+              option.textContent = 'No position history';
+              option.value = '';
+              select.append(option);
+              document.getElementById('chart-shell').innerHTML =
+                '<div class="empty">Import IBKR positions and executions ' +
+                'to populate this chart.</div>';
+              return;
+            }
+            const openGroup = document.createElement('optgroup');
+            openGroup.label = 'Open positions';
+            const closedGroup = document.createElement('optgroup');
+            closedGroup.label = 'Closed positions';
+            for (const position of positions) {
+              const option = document.createElement('option');
+              option.value = position.instrument_id;
+              option.dataset.accountId = position.account_id;
+              option.dataset.status = position.status;
+              option.textContent = position.status === 'open'
+                ? `${position.symbol} · ${position.quantity} · ${position.currency}`
+                : `${position.symbol} · closed · ${position.currency}`;
+              (position.status === 'open' ? openGroup : closedGroup).append(option);
+            }
+            if (openGroup.children.length) select.append(openGroup);
+            if (closedGroup.children.length) select.append(closedGroup);
+            if (!openGroup.children.length && closedGroup.children.length) {
+              state.interval = '1d';
+              state.range = 'ytd';
+              updateCompatibility();
+            }
+            await loadChart();
+          }
+
+          async function loadChart() {
+            const selected = selectedPosition();
+            if (!selected) return;
+            const shell = document.getElementById('chart-shell');
+            shell.classList.add('loading');
+            const params = new URLSearchParams({
+              account_id: selected.accountId,
+              interval: state.interval,
+              range: state.range,
+            });
+            try {
+              const response = await fetch(
+                `/analysis/position-chart/data/${encodeURIComponent(selected.instrumentId)}?${params}`
+              );
+              if (!response.ok) {
+                const error = await response.json().catch(() => ({}));
+                throw new Error(error.detail || `Chart request failed (${response.status})`);
+              }
+              state.payload = await response.json();
+              render(state.payload);
+            } catch (error) {
+              console.error(error);
+              shell.innerHTML = '';
+              const empty = document.createElement('div');
+              empty.className = 'empty';
+              empty.textContent = error.message || 'Position chart unavailable.';
+              shell.append(empty);
+            } finally {
+              shell.classList.remove('loading');
+            }
+          }
+
+          function render(payload) {
+            document.getElementById('quantity').textContent = formatNumber(payload.quantity);
+            document.getElementById('average-cost').textContent =
+              formatMoney(payload.average_cost, payload.currency);
+            document.getElementById('latest-price').textContent =
+              formatMoney(payload.latest_price, payload.currency);
+            document.getElementById('indicative-pnl').textContent =
+              formatMoney(payload.indicative_unrealized_pnl, payload.currency);
+            document.getElementById('instrument-label').textContent =
+              `${payload.symbol} · ${payload.name} · ` +
+              `${payload.exchange || 'exchange unknown'} · ` +
+              `${payload.position_status === 'closed' ? 'Closed position' : 'Open position'}`;
+            const intervalLabel = payload.actual_interval || 'execution only';
+            document.getElementById('source-badge').textContent =
+              `${intervalLabel} · ${payload.provider || 'IBKR only'}` +
+              `${payload.fallback ? ' · fallback' : ''}`;
+            renderReconciliation(payload);
+            renderWarnings(payload.warnings);
+            renderPlot(payload);
+          }
+
+          function renderReconciliation(payload) {
+            const counts = payload.reconciliation;
+            const element = document.getElementById('reconciliation');
+            const hasWarning = counts.warning > 0 || counts.unavailable > 0
+              || payload.warnings.length > 0;
+            element.classList.toggle('warning', hasWarning);
+            element.textContent =
+              `Reconciliation: ${counts.matched} matched · ${counts.near} near · ` +
+              `${counts.warning} warning · ${counts.unavailable} unavailable · ` +
+              `multiplier ${payload.price_multiplier} · ` +
+              `${payload.provider_currency || 'currency unknown'} / ${payload.currency}`;
+          }
+
+          function renderWarnings(warnings) {
+            const list = document.getElementById('warnings');
+            list.innerHTML = '';
+            for (const warning of warnings) {
+              const item = document.createElement('li');
+              item.textContent = warning;
+              list.append(item);
+            }
+          }
+
+          function executionTrace(executions, side, color, outlineColor, symbol) {
+            const selected = executions.filter(item => item.side === side);
+            const action = side === 'buy' ? 'BUY' : 'SELL';
+            return {
+              type: 'scatter',
+              mode: 'markers+text',
+              name: `${action} execution · IBKR`,
+              x: selected.map(item => item.occurred_at),
+              y: selected.map(item => numeric(item.price)),
+              text: selected.map(() => action),
+              textposition: side === 'buy' ? 'bottom center' : 'top center',
+              textfont: {
+                color: outlineColor,
+                size: 10,
+                family: '-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif',
+              },
+              customdata: selected.map(item => [
+                item.quantity,
+                item.fees,
+                item.status,
+                item.difference_percent,
+                item.reason,
+                item.occurred_at,
+              ]),
+              marker: {
+                color,
+                size: selected.map(item =>
+                  ['warning', 'unavailable'].includes(item.status) ? 19 : 16
+                ),
+                symbol,
+                line: {
+                  color: selected.map(item =>
+                    ['warning', 'unavailable'].includes(item.status)
+                      ? '#facc15'
+                      : outlineColor
+                  ),
+                  width: selected.map(item =>
+                    ['warning', 'unavailable'].includes(item.status) ? 4 : 2
+                  ),
+                },
+              },
+              cliponaxis: false,
+              hoverlabel: {
+                bgcolor: color,
+                bordercolor: outlineColor,
+                font: {color: '#ffffff'},
+                namelength: -1,
+              },
+              hovertemplate:
+                `<b>${action} · IBKR execution</b><br>` +
+                'Time: %{customdata[5]}<br>' +
+                `Execution price: %{y:.4f} ${state.payload.currency}<br>` +
+                'Quantity: %{customdata[0]}<br>' +
+                `Fees: %{customdata[1]} ${state.payload.currency}<br>` +
+                'Reconciliation: %{customdata[2]}<br>' +
+                'Difference: %{customdata[3]}<br>' +
+                'Reason: %{customdata[4]}<extra></extra>',
+            };
+          }
+
+          function renderPlot(payload) {
+            const shell = document.getElementById('chart-shell');
+            shell.innerHTML = '<div id="position-chart"></div>';
+            const candles = payload.candles;
+            const x = candles.map(item => item.observed_at);
+            const traces = [];
+            if (candles.length) {
+              traces.push({
+                type: 'candlestick',
+                name: payload.symbol,
+                x,
+                open: candles.map(item => numeric(item.open)),
+                high: candles.map(item => numeric(item.high)),
+                low: candles.map(item => numeric(item.low)),
+                close: candles.map(item => numeric(item.close)),
+                increasing: {line: {color: '#16a34a'}},
+                decreasing: {line: {color: '#dc2626'}},
+                hoverlabel: {namelength: -1},
+              });
+            }
+            if (document.getElementById('indicator-sma').checked && candles.length) {
+              traces.push({
+                type: 'scatter',
+                mode: 'lines',
+                name: 'SMA 20',
+                x,
+                y: payload.indicators.sma20.map(numeric),
+                line: {color: '#7c3aed', width: 1.8},
+                connectgaps: false,
+              });
+            }
+            traces.push(
+              executionTrace(
+                payload.executions,
+                'buy',
+                '#2563eb',
+                '#1e3a8a',
+                'triangle-up',
+              ),
+              executionTrace(
+                payload.executions,
+                'sell',
+                '#f97316',
+                '#9a3412',
+                'triangle-down',
+              ),
+            );
+            const showVolume = document.getElementById('indicator-volume').checked
+              && candles.some(item => item.volume !== null);
+            if (showVolume) {
+              traces.push({
+                type: 'bar',
+                name: 'Volume',
+                x,
+                y: candles.map(item => numeric(item.volume)),
+                marker: {color: '#94a3b8'},
+                opacity: .55,
+                yaxis: 'y2',
+                hovertemplate: 'Volume %{y}<extra></extra>',
+              });
+            }
+            const shapes = [];
+            if (numeric(payload.average_cost) !== null) {
+              shapes.push({
+                type: 'line',
+                xref: 'paper',
+                x0: 0,
+                x1: 1,
+                y0: numeric(payload.average_cost),
+                y1: numeric(payload.average_cost),
+                line: {color: '#2563eb', width: 1.5, dash: 'dot'},
+              });
+            }
+            const annotations = numeric(payload.average_cost) === null ? [] : [{
+              xref: 'paper',
+              x: 1,
+              y: numeric(payload.average_cost),
+              text: `IBKR avg ${formatMoney(payload.average_cost, payload.currency)}`,
+              showarrow: false,
+              xanchor: 'right',
+              yanchor: 'bottom',
+              font: {color: '#1d4ed8', size: 11},
+              bgcolor: 'rgba(255,255,255,.8)',
+            }];
+            const layout = {
+              autosize: true,
+              height: 500,
+              margin: {l: 54, r: 24, t: 24, b: 48},
+              paper_bgcolor: '#ffffff',
+              plot_bgcolor: '#ffffff',
+              font: {family: '-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif'},
+              hovermode: 'closest',
+              hoverdistance: 50,
+              dragmode: 'pan',
+              showlegend: true,
+              legend: {orientation: 'h', x: 0, y: 1.08},
+              xaxis: {
+                rangeslider: {visible: false},
+                showgrid: true,
+                gridcolor: '#eef2f7',
+                type: 'date',
+              },
+              yaxis: {
+                title: payload.currency,
+                domain: showVolume ? [.24, 1] : [0, 1],
+                showgrid: true,
+                gridcolor: '#eef2f7',
+                fixedrange: false,
+              },
+              shapes,
+              annotations,
+            };
+            if (showVolume) {
+              layout.yaxis2 = {
+                domain: [0, .18],
+                showgrid: false,
+                title: 'Volume',
+                fixedrange: false,
+              };
+            }
+            Plotly.newPlot('position-chart', traces, layout, {
+              responsive: true,
+              displaylogo: false,
+              scrollZoom: true,
+              modeBarButtonsToRemove: ['select2d', 'lasso2d'],
+            });
+          }
+
+          document.getElementById('position-select').addEventListener('change', () => {
+            const selected = selectedPosition();
+            if (selected?.status === 'closed') {
+              state.interval = '1d';
+              state.range = 'ytd';
+              updateCompatibility();
+            }
+            loadChart();
+          });
+          for (const button of document.querySelectorAll('#interval-buttons .choice')) {
+            button.addEventListener('click', () => {
+              state.interval = button.dataset.value;
+              updateCompatibility();
+              loadChart();
+            });
+          }
+          for (const button of document.querySelectorAll('#range-buttons .choice')) {
+            button.addEventListener('click', () => {
+              state.range = button.dataset.value;
+              syncButtons();
+              loadChart();
+            });
+          }
+          document.getElementById('indicator-sma').addEventListener('change', () => {
+            if (state.payload) renderPlot(state.payload);
+          });
+          document.getElementById('indicator-volume').addEventListener('change', () => {
+            if (state.payload) renderPlot(state.payload);
+          });
+
+          loadPositions().catch(error => {
+            const shell = document.getElementById('chart-shell');
+            shell.innerHTML = '';
+            const empty = document.createElement('div');
+            empty.className = 'empty';
+            empty.textContent = String(error.message || error);
+            shell.append(empty);
+          });
+        </script>
+      </body>
+    </html>
+    """
 
 
 def signal_page(signal_id: str) -> str:

@@ -4,6 +4,11 @@ from decimal import Decimal
 import pytest
 from fastapi.testclient import TestClient
 
+from pa_investing.analytics.position_chart import (
+    ChartCandle,
+    ChartExecution,
+    PositionChartResult,
+)
 from pa_investing.core.config import Settings
 from pa_investing.core.dependencies import (
     OperationsAnalysisContext,
@@ -12,6 +17,7 @@ from pa_investing.core.dependencies import (
     get_historical_data_service,
     get_instrument_resolution_service,
     get_operations_analysis_context,
+    get_position_chart_service,
     get_refresh_and_sync_workflow,
     get_settings,
 )
@@ -264,6 +270,114 @@ def test_portfolio_analysis_page() -> None:
     assert "Portfolio Analysis" in response.text
     assert "allocation-donut" in response.text
     assert "nav-chart" in response.text
+    assert 'href="/analysis/position-chart"' in response.text
+
+
+def test_position_chart_page_has_trading_controls_and_indicators() -> None:
+    client = _public_test_client()
+
+    response = client.get("/analysis/position-chart")
+
+    assert response.status_code == 200
+    assert "Position Chart" in response.text
+    assert 'data-value="5m"' in response.text
+    assert 'data-value="1d"' in response.text
+    assert 'data-value="1wk"' in response.text
+    assert 'data-value="1mo"' in response.text
+    assert 'id="indicator-sma"' in response.text
+    assert 'id="indicator-volume"' in response.text
+    assert "/analysis/position-chart/positions" in response.text
+    assert "reconciliation" in response.text
+    assert 'href="/analysis/portfolio"' in response.text
+    assert "yaxis2: showVolume" not in response.text
+    assert "layout.yaxis2 = {" in response.text
+    assert "const action = side === 'buy' ? 'BUY' : 'SELL';" in response.text
+    assert "name: `${action} execution · IBKR`" in response.text
+    assert "<b>${action} · IBKR execution</b>" in response.text
+    assert "Execution price: %{y:.4f}" in response.text
+    assert "Quantity: %{customdata[0]}" in response.text
+    assert "hovermode: 'closest'" in response.text
+    assert "openGroup.label = 'Open positions'" in response.text
+    assert "closedGroup.label = 'Closed positions'" in response.text
+    assert "state.range = 'ytd'" in response.text
+
+
+def test_position_chart_data_route_serializes_candles_and_reconciliation() -> None:
+    class FakePositionChartService:
+        def build(self, **_: object) -> PositionChartResult:
+            return PositionChartResult(
+                account_id="U1",
+                instrument_id="aapl-id",
+                symbol="AAPL",
+                name="Apple Inc.",
+                currency="USD",
+                exchange="NASDAQ",
+                position_status="open",
+                quantity=Decimal("5"),
+                average_cost=Decimal("10"),
+                latest_price=Decimal("10.25"),
+                indicative_unrealized_pnl=Decimal("1.25"),
+                requested_interval="5m",
+                actual_interval="5m",
+                requested_range="1d",
+                provider="yahoo",
+                provider_symbol="AAPL",
+                provider_exchange="NASDAQ",
+                provider_currency="USD",
+                price_multiplier=Decimal("1"),
+                timezone="America/New_York",
+                fallback=False,
+                warnings=(),
+                candles=(
+                    ChartCandle(
+                        observed_at=datetime(2026, 7, 30, 14, tzinfo=UTC),
+                        open=Decimal("10"),
+                        high=Decimal("10.5"),
+                        low=Decimal("9.5"),
+                        close=Decimal("10.25"),
+                        volume=Decimal("100"),
+                    ),
+                ),
+                executions=(
+                    ChartExecution(
+                        transaction_id="trade-1",
+                        occurred_at=datetime(2026, 7, 30, 14, 2, tzinfo=UTC),
+                        side="buy",
+                        quantity=Decimal("1"),
+                        price=Decimal("10"),
+                        fees=Decimal("-1"),
+                        status="matched",
+                        difference_percent=Decimal("0"),
+                        reason="inside_candle_range",
+                    ),
+                ),
+                sma20=(None,),
+            )
+
+    app = create_app()
+    app.dependency_overrides[get_position_chart_service] = FakePositionChartService
+    app.dependency_overrides[get_settings] = lambda: Settings(
+        analytics_auth_enabled=False,
+    )
+
+    response = TestClient(app).get(
+        "/analysis/position-chart/data/aapl-id",
+        params={"account_id": "U1", "interval": "5m", "range": "1d"},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["actual_interval"] == "5m"
+    assert payload["position_status"] == "open"
+    assert payload["candles"][0]["close"] == "10.25"
+    assert payload["executions"][0]["price"] == "10"
+    assert payload["reconciliation"] == {
+        "matched": 1,
+        "near": 0,
+        "warning": 0,
+        "unavailable": 0,
+    }
+    assert payload["indicators"]["sma20"] == [None]
 
 
 def test_analysis_signal_page_contains_signal_id() -> None:
@@ -542,7 +656,8 @@ def test_daily_pnl_route_prefers_broker_change_in_nav_mtm() -> None:
 
     class FakePortfolioSnapshotRepository:
         def list_history(self, days: int | None = None) -> list[PortfolioSnapshot]:
-            raise AssertionError("snapshot fallback should not be used")
+            assert days == 220
+            return []
 
     class FakeBrokerDailyNavRepository:
         def list_history(self, days: int | None = None) -> list[BrokerDailyNav]:

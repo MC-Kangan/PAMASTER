@@ -109,11 +109,46 @@ def build_broker_daily_pnl(
     filtered = [
         point for point in daily_nav if point.currency == reporting_currency
     ]
-    filtered.sort(key=lambda point: (point.report_date, point.account_id))
+    grouped: dict[date, list[BrokerDailyNav]] = {}
+    for point in filtered:
+        grouped.setdefault(point.report_date, []).append(point)
+    portfolio_daily_nav = [
+        BrokerDailyNav(
+            account_id="__PORTFOLIO__",
+            report_date=report_date,
+            provider="ibkr-flex",
+            currency=reporting_currency,
+            starting_value=sum(
+                (point.starting_value for point in points),
+                Decimal("0"),
+            ),
+            ending_value=sum(
+                (point.ending_value for point in points),
+                Decimal("0"),
+            ),
+            mtm=sum((point.mtm for point in points), Decimal("0")),
+            realized=sum((point.realized for point in points), Decimal("0")),
+            change_in_unrealized=sum(
+                (point.change_in_unrealized for point in points),
+                Decimal("0"),
+            ),
+            deposits_withdrawals=sum(
+                (point.deposits_withdrawals for point in points),
+                Decimal("0"),
+            ),
+            commissions=sum(
+                (point.commissions for point in points),
+                Decimal("0"),
+            ),
+            dividends=sum((point.dividends for point in points), Decimal("0")),
+            interest=sum((point.interest for point in points), Decimal("0")),
+        )
+        for report_date, points in sorted(grouped.items())
+    ]
 
     points: list[IndicativeDailyPnlPoint] = []
     previous_point: BrokerDailyNav | None = None
-    for point in filtered:
+    for point in portfolio_daily_nav:
         pnl_percent = None
         if point.starting_value != 0:
             pnl_percent = point.mtm / point.starting_value
