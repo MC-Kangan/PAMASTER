@@ -581,14 +581,71 @@ For the current UGREEN app workflow, use `docker-compose.ugreen-lan.yml`. It pub
 loopback-vs-LAN confusion. PostgreSQL remains private to the Compose network in all variants:
 never publish host port `5432`.
 
-### Initial Installation
+### UGREEN Docker App Deployment Checklist
 
-Create and protect `backend/.env` with the first three commands below. This ignored file is the
-only location for production secrets: never commit a secret or place one in another file, a
-command, a scheduler definition, Notion, or Git. Before running `docker compose config --quiet`,
-set these values in `backend/.env`:
+This is the default process for the current NAS deployment. Build the application image on the
+Mac, upload the resulting image archive to the NAS, and run it with
+`docker-compose.ugreen-lan.yml` in the UGREEN Docker app. This path does not use
+`PA_BIND_ADDRESS`; LAN exposure is controlled by `PA_NAS_HTTP_PORT`.
+
+#### 1. Build the image on the Mac
+
+Run from the local checkout:
+
+```bash
+cd /Users/chenkangan/Documents/PAMASTER/backend
+tag=$(git rev-parse --short HEAD)
+docker build --platform linux/amd64 -t "pa-investing-backend:${tag}" .
+docker save "pa-investing-backend:${tag}" -o "pa-investing-backend-${tag}.tar"
+echo "${tag}"
+```
+
+The printed tag is the value to use for `PA_BACKEND_IMAGE`. For example, if the tag is
+`500a91e`, set:
 
 ```text
+PA_BACKEND_IMAGE=pa-investing-backend:500a91e
+```
+
+#### 2. Copy two files to the NAS
+
+Copy these two files to a NAS folder you can select from the UGREEN Docker app:
+
+```text
+backend/pa-investing-backend-<tag>.tar
+backend/docker-compose.ugreen-lan.yml
+```
+
+Do not copy `.env` from the Mac if it contains local-only values. Configure NAS secrets in the
+UGREEN project environment editor instead.
+
+#### 3. Import the image in UGREEN Docker
+
+In the UGREEN Docker app:
+
+1. Open `Images` / `Local Images`.
+2. Click `Add Image`.
+3. Choose `Import from NAS`.
+4. Select `pa-investing-backend-<tag>.tar`.
+5. Wait until the image appears as `pa-investing-backend:<tag>`.
+
+If the image shows as abnormal, delete that imported image and import the tar again. Do not create
+the project until the image is healthy.
+
+#### 4. Create or update the Compose project
+
+In the UGREEN Docker app:
+
+1. Open `Projects`.
+2. Create a project, or edit the existing `pa-investing` project.
+3. Import/use `docker-compose.ugreen-lan.yml`.
+4. Set the project environment variables below.
+5. Start/recreate the project.
+
+Required project environment values:
+
+```text
+PA_BACKEND_IMAGE=pa-investing-backend:<tag>
 PA_POSTGRES_PASSWORD
 PA_NOTION_ENABLED=true
 PA_NOTION_API_KEY
@@ -615,6 +672,92 @@ PA_NAS_HTTP_PORT=8000
 
 Use distinct URL-safe secrets for `PA_POSTGRES_PASSWORD`, analytics authentication, and
 `PA_WORKFLOW_API_TOKEN`; do not reuse those credentials with Notion, IBKR, or Twelve Data.
+
+For the UGREEN LAN compose path, do not set `PA_BIND_ADDRESS`. That variable belongs to the
+loopback/private-proxy compose files. `docker-compose.ugreen-lan.yml` publishes the API as:
+
+```yaml
+ports:
+  - "${PA_NAS_HTTP_PORT:-8000}:8000"
+```
+
+The container command already runs Uvicorn correctly on `0.0.0.0:8000` inside the container.
+
+#### 5. Run database migrations
+
+For a fresh database, or after pulling a new image with migrations, run:
+
+```bash
+alembic upgrade head
+```
+
+In the UGREEN Docker app this is usually done from the `backend-api` container terminal. If the
+app only supports command fields, temporarily run the backend image with command
+`alembic upgrade head`, wait for it to complete, then restore the normal API command:
+
+```text
+uvicorn pa_investing.main:app --host 0.0.0.0 --port 8000
+```
+
+If the NAS has a terminal, the equivalent command is:
+
+```bash
+cd /volume1/docker/pa-investing/backend
+PA_BACKEND_IMAGE=pa-investing-backend:<tag> \
+docker compose -f docker-compose.ugreen-lan.yml run --rm backend-api alembic upgrade head
+```
+
+#### 6. Start and smoke test
+
+After the project is running, find the NAS IP in UGOS network settings. In the current setup it
+has previously been:
+
+```text
+192.168.1.137
+```
+
+From the Mac:
+
+```bash
+curl --fail http://192.168.1.137:8000/health
+```
+
+Expected response:
+
+```json
+{"status":"ok"}
+```
+
+Then open:
+
+```text
+http://192.168.1.137:8000/analysis/portfolio
+```
+
+Log in with `PA_ANALYTICS_AUTH_USERNAME` and `PA_ANALYTICS_AUTH_PASSWORD` if analytics auth is
+enabled.
+
+#### 7. First browser refresh
+
+From the Portfolio page:
+
+1. Click `Refresh Positions`.
+2. Confirm the status says positions and trades were refreshed.
+3. Wait for the configured IBKR cooldown, usually 15 minutes.
+4. Click `Refresh History`.
+5. Confirm the `Positions query` and `History query` labels updated.
+6. Confirm the P&L Calendar and Latest Broker P&L Contributors show the latest broker report date
+   available from IBKR.
+
+### Terminal-Based Installation Alternative
+
+Use this only if the NAS has a working terminal with Docker Compose and you intentionally want to
+build or manage the project from the NAS shell.
+
+Create and protect `backend/.env` with the first three commands below. This ignored file is the
+only location for production secrets: never commit a secret or place one in another file, a
+command, a scheduler definition, Notion, or Git. Before running `docker compose config --quiet`,
+set the same required values listed in the UGREEN checklist.
 
 ```bash
 cd /volume1/docker/pa-investing/backend
@@ -733,21 +876,25 @@ the temporary database is removed.
 
 ### Update and Rollback
 
-For each application update:
+For the UGREEN Docker app path, an application update is the same checklist as deployment:
 
-```bash
-cd /volume1/docker/pa-investing/backend
-scripts/backup_postgres.sh
-git pull --ff-only
-docker compose build --pull
-docker compose run --rm backend-api alembic upgrade head
-docker compose up -d
-docker compose ps
-curl --fail http://127.0.0.1:8000/health
-```
+1. Build a new image on the Mac from the current Git commit.
+2. Save it as `pa-investing-backend-<tag>.tar`.
+3. Import the tar into UGREEN Docker images.
+4. Update the project environment value `PA_BACKEND_IMAGE=pa-investing-backend:<tag>`.
+5. Recreate/start the project.
+6. Run `alembic upgrade head` once for that image.
+7. Test `/health`, then open `/analysis/portfolio`.
 
-If the NAS does not have Git or should not build from source, build the backend image on a laptop
-and load it on the NAS instead:
+Before updating, take a database backup if the NAS backup task is not already known-good. If the
+UGREEN app cannot run the backup script directly, use the existing PostgreSQL volume snapshot or a
+NAS-level backup before replacing the running project.
+
+Rollback means setting `PA_BACKEND_IMAGE` back to the previous known-good image tag and recreating
+the project. Database rollback must use a pre-update database backup; do not run Alembic downgrade
+commands against the only production database without a tested restore.
+
+Terminal users can perform the same update with:
 
 ```bash
 cd /Users/chenkangan/Documents/PAMASTER/backend
@@ -756,30 +903,7 @@ docker build --platform linux/amd64 -t "pa-investing-backend:${tag}" .
 docker save "pa-investing-backend:${tag}" -o "pa-investing-backend-${tag}.tar"
 ```
 
-Transfer `pa-investing-backend-${tag}.tar` and `docker-compose.ugreen-lan.yml` to the NAS. In the
-UGREEN Docker app:
-
-1. Open `Images` / `Local Images`.
-2. Use `Add Image` -> `Import from NAS`.
-3. Select `pa-investing-backend-${tag}.tar`.
-4. Create or update the Compose project from `docker-compose.ugreen-lan.yml`.
-5. Set `PA_BACKEND_IMAGE=pa-investing-backend:${tag}`.
-6. Set the required `PA_*` environment values listed above.
-7. Start the project.
-8. Test `http://<nas-ip>:${PA_NAS_HTTP_PORT:-8000}/health`.
-9. Open `http://<nas-ip>:${PA_NAS_HTTP_PORT:-8000}/analysis/portfolio`.
-
-The UGREEN LAN compose file intentionally maps the API as:
-
-```yaml
-ports:
-  - "${PA_NAS_HTTP_PORT:-8000}:8000"
-```
-
-Do not add `PA_BIND_ADDRESS` to this LAN compose path. The container still runs Uvicorn on
-`0.0.0.0:8000`, and Docker publishes that container port to the NAS LAN port.
-
-If a terminal is available on the NAS, the equivalent commands are:
+Then on the NAS terminal:
 
 ```bash
 docker load -i /path/to/pa-investing-backend-<tag>.tar
@@ -791,31 +915,6 @@ docker compose -f docker-compose.ugreen-lan.yml up -d
 docker compose -f docker-compose.ugreen-lan.yml ps
 curl --fail http://<nas-ip>:${PA_NAS_HTTP_PORT:-8000}/health
 ```
-
-When using the UGREEN Docker app instead of the terminal, set the image/tag and environment values
-through the project editor. Keep these values aligned with the image you loaded:
-
-- image: `pa-investing-backend:<tag>`
-- API command: `uvicorn pa_investing.main:app --host 0.0.0.0 --port 8000`
-- NAS port: `${PA_NAS_HTTP_PORT:-8000}`, mapped to container port `8000`
-- storage: persistent PostgreSQL volume plus any configured Compose volumes
-- environment: all required `PA_*` values from the `Initial Installation` section
-
-After the project starts, test the API from another machine on the LAN or tailnet:
-
-```bash
-curl --fail http://<nas-ip-or-tailnet-name>:<nas-port>/health
-```
-
-Then open:
-
-```text
-http://<nas-ip-or-tailnet-name>:<nas-port>/analysis/portfolio
-```
-
-Application rollback means checking out the previously deployed commit and rebuilding the backend
-image. Database rollback must use the pre-update dump; never run an Alembic downgrade against the
-only production database without a tested restore.
 
 ## Docker
 
