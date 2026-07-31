@@ -57,6 +57,7 @@ from pa_investing.market_data.history.models import (
 from pa_investing.workflows.agent_api import DailyReviewResult
 from pa_investing.workflows.broker_import import BrokerImportResult
 from pa_investing.workflows.full_refresh import (
+    FullRefreshCooldownError,
     FullRefreshError,
     FullRefreshResult,
     IbkrHistoryImportResult,
@@ -1006,6 +1007,34 @@ def test_browser_refresh_route_returns_stage_error(stage: str, message: str) -> 
         "detail": {
             "stage": stage,
             "message": message,
+        }
+    }
+
+
+def test_browser_refresh_route_returns_cooldown_error() -> None:
+    app = create_app()
+    app.dependency_overrides[get_settings] = lambda: Settings(
+        analytics_auth_enabled=False,
+    )
+    workflow = FakeFullRefreshWorkflow(error=FullRefreshCooldownError(600))
+    app.dependency_overrides[get_full_refresh_workflow] = lambda: workflow
+
+    response = TestClient(app).post(
+        "/analysis/refresh",
+        json={},
+        headers={"X-PA-Request": "refresh"},
+    )
+
+    assert response.status_code == 429
+    assert workflow.call_count == 1
+    assert response.json() == {
+        "detail": {
+            "stage": "ibkr_cooldown",
+            "message": (
+                "IBKR refresh was requested recently. "
+                "Please try again in about 600 seconds."
+            ),
+            "retry_after_seconds": 600,
         }
     }
 

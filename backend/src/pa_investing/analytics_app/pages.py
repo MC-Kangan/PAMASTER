@@ -651,6 +651,10 @@ def portfolio_page() -> str:
                         ? `${payload.detail.stage}: `
                         : '';
                       detail = `${stage}${payload.detail.message}`;
+                      if (payload.detail.retry_after_seconds) {
+                        const minutes = Math.ceil(payload.detail.retry_after_seconds / 60);
+                        detail = `${detail} (${minutes} min)`;
+                      }
                     } else {
                       detail = payload.detail || detail;
                     }

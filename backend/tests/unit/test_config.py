@@ -2,13 +2,14 @@ from pa_investing.core.config import Settings
 
 
 def test_settings_defaults_are_safe_for_local_tests() -> None:
-    settings = Settings()
+    settings = Settings(_env_file=None)
 
     assert settings.environment == "test"
     assert settings.notion_enabled is False
     assert settings.llm_provider == "mock"
     assert settings.database_url.startswith("sqlite+pysqlite://")
     assert settings.workflow_api_token == ""
+    assert settings.ibkr_flex_refresh_cooldown_seconds == 900
 
 
 def test_settings_include_live_notion_and_market_data_fields() -> None:

@@ -84,7 +84,11 @@ from pa_investing.market_data.history.service import HistoricalDataService
 from pa_investing.notion.sync import PORTFOLIO_BASE_CURRENCY_KEY
 from pa_investing.presentation.fields import serialize_decimal
 from pa_investing.workflows.agent_api import DailyReviewResult
-from pa_investing.workflows.full_refresh import FullRefreshError, FullRefreshWorkflow
+from pa_investing.workflows.full_refresh import (
+    FullRefreshCooldownError,
+    FullRefreshError,
+    FullRefreshWorkflow,
+)
 from pa_investing.workflows.refresh_and_sync import RefreshAndSyncWorkflow
 
 router = APIRouter()
@@ -615,6 +619,15 @@ def browser_refresh_route(
 ) -> BrowserRefreshResponse:
     try:
         result = workflow.run()
+    except FullRefreshCooldownError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail={
+                "stage": exc.stage,
+                "message": str(exc),
+                "retry_after_seconds": exc.retry_after_seconds,
+            },
+        ) from exc
     except FullRefreshError as exc:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,

@@ -27,6 +27,7 @@ class Settings(BaseSettings):
     ibkr_flex_query_id: str = ""
     ibkr_flex_history_query_id: str = ""
     ibkr_flex_timezone: str = "UTC"
+    ibkr_flex_refresh_cooldown_seconds: int = 900
     market_data_reconciliation_tolerance: Decimal = Field(
         default=Decimal("0.01"),
         ge=Decimal("0"),
