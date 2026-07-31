@@ -32,6 +32,7 @@ from pa_investing.api.schemas import (
     BrowserHistoryRefreshResponse,
     BrowserPositionRefreshResponse,
     BrowserRefreshResponse,
+    BrowserRefreshStatusResponse,
     CurrentHoldingResponse,
     CurrentPortfolioResponse,
     HistoricalResearchRequest,
@@ -88,6 +89,9 @@ from pa_investing.presentation.fields import serialize_decimal
 from pa_investing.workflows.agent_api import DailyReviewResult
 from pa_investing.workflows.broker_import import BrokerImportResult
 from pa_investing.workflows.full_refresh import (
+    LAST_COMPLETED_AT_KEY,
+    LAST_HISTORY_COMPLETED_AT_KEY,
+    LAST_POSITIONS_COMPLETED_AT_KEY,
     FullRefreshCooldownError,
     FullRefreshError,
     FullRefreshWorkflow,
@@ -375,7 +379,7 @@ def indicative_daily_pnl_analysis(
         Depends(get_broker_daily_nav_repository),
     ],
     _: Annotated[None, Depends(require_analytics_auth)],
-    days: int | None = 90,
+    days: int | None = None,
 ) -> IndicativeDailyPnlResponse:
     broker_history = broker_nav_repository.list_history(days=days)
     snapshots = repository.list_history(days=days)
@@ -683,6 +687,31 @@ def browser_refresh_history_route(
     )
 
 
+@router.get(
+    "/analysis/refresh/status",
+    response_model=BrowserRefreshStatusResponse,
+)
+def browser_refresh_status_route(
+    context: Annotated[
+        PortfolioAnalysisContext,
+        Depends(get_portfolio_analysis_context),
+    ],
+    _: Annotated[None, Depends(require_analytics_auth)],
+) -> BrowserRefreshStatusResponse:
+    repository = context.app_setting_repository
+    return BrowserRefreshStatusResponse(
+        last_positions_refreshed_at=_parse_refresh_timestamp(
+            repository.get(LAST_POSITIONS_COMPLETED_AT_KEY)
+        ),
+        last_history_refreshed_at=_parse_refresh_timestamp(
+            repository.get(LAST_HISTORY_COMPLETED_AT_KEY)
+        ),
+        last_full_refresh_completed_at=_parse_refresh_timestamp(
+            repository.get(LAST_COMPLETED_AT_KEY)
+        ),
+    )
+
+
 def _position_refresh_response(
     result: PositionRefreshResult,
     settings: Settings,
@@ -759,6 +788,18 @@ def _format_decimal_or_none(value: Decimal | None) -> str | None:
     if value is None:
         return None
     return _format_decimal(value)
+
+
+def _parse_refresh_timestamp(value: str | None) -> datetime | None:
+    if not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(value)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=UTC)
+    return parsed.astimezone(UTC)
 
 
 def _historical_unavailable(

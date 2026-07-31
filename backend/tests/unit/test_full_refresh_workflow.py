@@ -7,11 +7,15 @@ from sqlalchemy.orm import sessionmaker
 
 from pa_investing.core.config import Settings
 from pa_investing.db.base import Base
+from pa_investing.db.repositories import AppSettingRepository
 from pa_investing.domain.enums import AssetClass
 from pa_investing.domain.models import Instrument, PortfolioSnapshot, Position
 from pa_investing.workflows.agent_api import DailyReviewResult
 from pa_investing.workflows.broker_import import BrokerImportResult
 from pa_investing.workflows.full_refresh import (
+    LAST_COMPLETED_AT_KEY,
+    LAST_HISTORY_COMPLETED_AT_KEY,
+    LAST_POSITIONS_COMPLETED_AT_KEY,
     FullRefreshCooldownError,
     FullRefreshError,
     FullRefreshWorkflow,
@@ -300,3 +304,39 @@ def test_full_refresh_cooldown_blocks_repeated_ibkr_calls() -> None:
     assert exc_info.value.stage == "ibkr_cooldown"
     assert exc_info.value.retry_after_seconds == 600
     assert calls == ["positions", "history", "dashboard"]
+
+
+def test_split_refreshes_record_separate_success_timestamps() -> None:
+    calls: list[str] = []
+    session_factory = StubSessionFactory()
+    settings = Settings(ibkr_flex_refresh_cooldown_seconds=1)
+
+    FullRefreshWorkflow(
+        settings=settings,
+        session_factory=session_factory,  # type: ignore[arg-type]
+        refresh_and_sync_workflow=StubRefreshAndSyncWorkflow(calls),  # type: ignore[arg-type]
+        position_importer=lambda **kwargs: successful_position_importer(**kwargs),
+        history_importer=lambda **kwargs: successful_history_importer(**kwargs),
+        clock=lambda: datetime(2026, 7, 31, 9, 0, tzinfo=UTC),
+    ).run_positions()
+
+    FullRefreshWorkflow(
+        settings=settings,
+        session_factory=session_factory,  # type: ignore[arg-type]
+        refresh_and_sync_workflow=StubRefreshAndSyncWorkflow(calls),  # type: ignore[arg-type]
+        position_importer=lambda **kwargs: successful_position_importer(**kwargs),
+        history_importer=lambda **kwargs: successful_history_importer(**kwargs),
+        clock=lambda: datetime(2026, 7, 31, 9, 1, tzinfo=UTC),
+    ).run_history()
+
+    with session_factory.session() as session:
+        repository = AppSettingRepository(session)
+        assert (
+            repository.get(LAST_POSITIONS_COMPLETED_AT_KEY)
+            == "2026-07-31T09:00:00+00:00"
+        )
+        assert (
+            repository.get(LAST_HISTORY_COMPLETED_AT_KEY)
+            == "2026-07-31T09:01:00+00:00"
+        )
+        assert repository.get(LAST_COMPLETED_AT_KEY) == "2026-07-31T09:01:00+00:00"

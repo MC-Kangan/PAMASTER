@@ -34,7 +34,11 @@ The backend currently includes:
 - refresh-and-sync workflow
 - performance-history analytics from persisted snapshots
 - browser auth gate for analytics pages
-- responsive browser performance page shell
+- responsive browser portfolio page with current allocation, NAV history, daily P&L calendar,
+  configurable display ranges, and IBKR query-freshness labels
+- browser-triggered split IBKR refresh actions for positions/trades and YTD broker history
+- Plotly position chart page with open/closed position selection, IBKR execution markers,
+  broker average-cost line, Yahoo candles, and trade-price reconciliation warnings
 - fixed snapshot cadence definition at `00:00`, `06:00`, `12:00`, `18:00`
 - one-shot scheduled snapshot command for NAS or host schedulers
 - persisted daily historical data with Yahoo-to-Twelve-Data whole-series fallback
@@ -391,7 +395,7 @@ fails, no Signal or Daily Review write is attempted in Notion.
 The chart-ready history endpoint is:
 
 ```text
-GET /analysis/performance
+GET /analysis/performance?days=30
 ```
 
 The current holdings and allocation endpoint is:
@@ -403,16 +407,40 @@ GET /analysis/current
 The indicative daily P&L history and browser refresh endpoints are:
 
 ```text
-GET /analysis/daily-pnl?days=90
-POST /analysis/refresh
+GET /analysis/daily-pnl?days=30
+GET /analysis/refresh/status
+POST /analysis/refresh/positions
+POST /analysis/refresh/history
 ```
 
-Daily P&L is indicative because it compares the latest available NAV snapshot for each calendar
-day and does not adjust for cash flows, trades, dividends, fees, or taxes. The reporting coverage
-value shows how much of the portfolio had reporting-currency values in each snapshot.
-Browser-initiated refresh runs the same refresh-and-sync workflow as the scheduled workflow, so
-enabled Notion synchronization continues to run before the page reloads its current holdings,
-performance history, and daily P&L data.
+The Portfolio tab defaults the P&L Calendar, NAV chart, summary cards, and Performance History
+table to the latest one month. The page selector can switch the display window to one month,
+three months, year-to-date, or all available history without changing the underlying imported
+data.
+
+Daily P&L prefers broker-reported IBKR Change in NAV MTM from the YTD history Flex query. If no
+broker daily NAV history has been imported, it falls back to indicative daily P&L from persisted
+portfolio snapshots. Indicative values compare the latest available NAV snapshot for each
+calendar day and do not adjust for cash flows, trades, dividends, fees, or taxes. The reporting
+coverage value shows how much of the portfolio had reporting-currency values in each snapshot.
+
+The browser has two separate IBKR refresh buttons because IBKR Flex can rate-limit back-to-back
+queries from a single token:
+
+- `Refresh Positions` imports positions, closed positions, and trade executions from
+  `PA_IBKR_FLEX_QUERY_ID`, then refreshes market prices, the dashboard snapshot, signals, and
+  optional Notion sync.
+- `Refresh History` imports YTD broker NAV and broker daily P&L from
+  `PA_IBKR_FLEX_HISTORY_QUERY_ID`. This is the refresh that advances the broker P&L Calendar and
+  Latest Broker P&L Contributors.
+
+The page shows small `Positions query` and `History query` labels. These timestamps record the
+last successful browser-triggered query for each Flex template. Manual terminal imports can
+update database rows without moving those browser-query labels.
+
+`PA_IBKR_FLEX_REFRESH_COOLDOWN_SECONDS` defaults to 900 seconds. Wait for that cooldown before
+pressing the other IBKR refresh button, otherwise IBKR may return `1018: Too many requests have
+been made from this token`.
 
 The provider-neutral transaction ledger and operational status endpoints are:
 
@@ -466,16 +494,16 @@ authentication enabled:
 - missing or incorrect credentials return `401`;
 - blank configured credentials return `503`, leaving the application closed;
 - credential comparison uses constant-time comparison;
-- browser-facing `POST /analysis/refresh` also requires `Content-Type: application/json` and the
-  exact non-simple request header `X-PA-Request: refresh`;
+- browser-facing refresh routes also require `Content-Type: application/json` and the exact
+  non-simple request header `X-PA-Request: refresh`;
 - workflow-facing `POST /workflows/refresh-and-sync` remains independently protected by the
   `PA_WORKFLOW_API_TOKEN` Bearer token and is unchanged.
 
 The custom request header and the application's absence of CORS permission form the CSRF boundary
-for `/analysis/refresh`: a cross-site form cannot supply the marker, and a cross-origin script
-cannot send it without a successful preflight. Do not add permissive CORS handling for this route.
-This design deliberately does not compare `Origin`, `Host`, or absolute URLs, so it remains valid
-behind a correctly configured reverse proxy.
+for browser refresh routes: a cross-site form cannot supply the marker, and a cross-origin script
+cannot send it without a successful preflight. Do not add permissive CORS handling for these
+routes. This design deliberately does not compare `Origin`, `Host`, or absolute URLs, so it
+remains valid behind a correctly configured reverse proxy.
 
 The current application login uses HTTP Basic authentication. Basic authentication is suitable for
 this single-user MVP only when it is transported over HTTPS and the application is not directly
@@ -621,6 +649,19 @@ Expected evidence:
 - Notion shows a Daily Review for the current Europe/London date.
 - Position `Price As Of`, `FX As Of`, reporting value, and portfolio weight are populated.
 
+After the browser app is reachable, the normal manual refresh path should be the Portfolio page,
+not a Docker terminal:
+
+1. Open `/analysis/portfolio`.
+2. Click `Refresh Positions`.
+3. Wait for the configured IBKR cooldown, usually 15 minutes.
+4. Click `Refresh History`.
+5. Confirm the `Positions query` and `History query` labels updated.
+
+The first button updates holdings, trades, the current NAV card, allocation, and the latest
+Performance History snapshot. The second button updates broker daily NAV/P&L and therefore the
+P&L Calendar and Latest Broker P&L Contributors.
+
 ### UGOS Task Schedule
 
 Before configuring these tasks, verify in UGOS that the system timezone is set to
@@ -707,7 +748,10 @@ docker build --platform linux/amd64 -t "pa-investing-backend:${tag}" .
 docker save "pa-investing-backend:${tag}" -o "pa-investing-backend-${tag}.tar"
 ```
 
-Transfer `pa-investing-backend-${tag}.tar` to the NAS. On the NAS:
+Transfer `pa-investing-backend-${tag}.tar` to the NAS. In the UGREEN Docker app, import it from
+`Images` / `Local Images` using `Add Image` -> `Import from NAS`, then create or update the
+Compose project with `docker-compose.prebuilt.yml`. If a terminal is available on the NAS, the
+equivalent commands are:
 
 ```bash
 docker load -i /path/to/pa-investing-backend-<tag>.tar
@@ -718,6 +762,27 @@ docker compose -f docker-compose.prebuilt.yml run --rm backend-api alembic upgra
 docker compose -f docker-compose.prebuilt.yml up -d
 docker compose -f docker-compose.prebuilt.yml ps
 curl --fail http://127.0.0.1:8000/health
+```
+
+When using the UGREEN Docker app instead of the terminal, set the image/tag and environment values
+through the project editor. Keep these values aligned with the image you loaded:
+
+- image: `pa-investing-backend:<tag>`
+- API command: `uvicorn pa_investing.main:app --host 0.0.0.0 --port 8000`
+- NAS port: the host port you want to access, mapped to container port `8000`
+- storage: persistent PostgreSQL volume plus any configured Compose volumes
+- environment: all required `PA_*` values from the `Initial Installation` section
+
+After the project starts, test the API from another machine on the LAN or tailnet:
+
+```bash
+curl --fail http://<nas-ip-or-tailnet-name>:<nas-port>/health
+```
+
+Then open:
+
+```text
+http://<nas-ip-or-tailnet-name>:<nas-port>/analysis/portfolio
 ```
 
 Application rollback means checking out the previously deployed commit and rebuilding the backend

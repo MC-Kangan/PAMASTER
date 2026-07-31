@@ -58,6 +58,12 @@ class BrowserHistoryRefreshResponse(BaseModel):
     history_import: IbkrHistoryImportResponse
 
 
+class BrowserRefreshStatusResponse(BaseModel):
+    last_positions_refreshed_at: datetime | None
+    last_history_refreshed_at: datetime | None
+    last_full_refresh_completed_at: datetime | None
+
+
 class PerformancePointResponse(BaseModel):
     observed_at: datetime
     nav: str

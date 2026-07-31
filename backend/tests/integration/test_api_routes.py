@@ -12,12 +12,14 @@ from pa_investing.analytics.position_chart import (
 from pa_investing.core.config import Settings
 from pa_investing.core.dependencies import (
     OperationsAnalysisContext,
+    PortfolioAnalysisContext,
     get_broker_daily_nav_repository,
     get_broker_daily_pnl_repository,
     get_full_refresh_workflow,
     get_historical_data_service,
     get_instrument_resolution_service,
     get_operations_analysis_context,
+    get_portfolio_analysis_context,
     get_position_chart_service,
     get_refresh_and_sync_workflow,
     get_settings,
@@ -982,6 +984,40 @@ def test_browser_refresh_history_route_returns_history_summary() -> None:
     }
 
 
+def test_browser_refresh_status_route_returns_last_query_timestamps() -> None:
+    app = create_app()
+    app.dependency_overrides[get_settings] = lambda: Settings(
+        analytics_auth_enabled=False,
+    )
+
+    class FakeAppSettingRepository:
+        values = {
+            "ibkr_positions_refresh_last_completed_at": "2026-07-31T08:25:17+00:00",
+            "ibkr_history_refresh_last_completed_at": "2026-07-31T08:40:00+00:00",
+            "ibkr_full_refresh_last_completed_at": "not-a-date",
+        }
+
+        def get(self, key: str, default: str | None = None) -> str | None:
+            return self.values.get(key, default)
+
+    app.dependency_overrides[get_portfolio_analysis_context] = lambda: (
+        PortfolioAnalysisContext(
+            position_repository=None,  # type: ignore[arg-type]
+            app_setting_repository=FakeAppSettingRepository(),  # type: ignore[arg-type]
+            fx_rate_repository=None,  # type: ignore[arg-type]
+        )
+    )
+
+    response = TestClient(app).get("/analysis/refresh/status")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "last_positions_refreshed_at": "2026-07-31T08:25:17Z",
+        "last_history_refreshed_at": "2026-07-31T08:40:00Z",
+        "last_full_refresh_completed_at": None,
+    }
+
+
 @pytest.mark.parametrize(
     "path",
     [
@@ -1216,11 +1252,19 @@ def test_performance_analysis_page_renders() -> None:
     assert 'id="portfolio-tab"' in response.text
     assert 'id="refresh-positions"' in response.text
     assert 'id="refresh-history"' in response.text
+    assert 'id="history-range"' in response.text
+    assert "Last 1 month" in response.text
+    assert 'id="positions-refresh-time"' in response.text
+    assert 'id="history-refresh-time"' in response.text
     assert 'id="dtd-pnl-amount"' in response.text
     assert 'id="dtd-pnl-percent"' in response.text
     assert 'id="pnl-calendar"' in response.text
     assert "Indicative P&amp;L" in response.text
-    assert "fetch('/analysis/daily-pnl?days=90')" in response.text
+    assert "let selectedHistoryDays = 30;" in response.text
+    assert "fetch(`/analysis/daily-pnl${rangeQuery()}`)" in response.text
+    assert "fetch(`/analysis/performance${rangeQuery()}`)" in response.text
+    assert "fetch('/analysis/refresh/status')" in response.text
+    assert "loadRefreshStatus()" in response.text
     assert "postRefresh('/analysis/refresh/positions')" in response.text
     assert "postRefresh('/analysis/refresh/history')" in response.text
     assert "'X-PA-Request': 'refresh'" in response.text

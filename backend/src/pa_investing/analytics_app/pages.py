@@ -149,6 +149,43 @@ def portfolio_page() -> str:
             gap: 12px;
             margin: 20px 0 24px;
           }
+          .dashboard-controls {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            justify-content: space-between;
+            gap: 10px;
+            margin: 0 0 16px;
+          }
+          .date-filter {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            color: #475569;
+            font-size: 13px;
+          }
+          .date-filter select {
+            min-height: 36px;
+            border: 1px solid #cbd5e1;
+            border-radius: 6px;
+            background: #ffffff;
+            color: #111827;
+            font: inherit;
+            padding: 6px 32px 6px 10px;
+          }
+          .freshness-labels {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+          }
+          .freshness-label {
+            border: 1px solid #dbe4f0;
+            border-radius: 999px;
+            background: #ffffff;
+            color: #475569;
+            font-size: 12px;
+            padding: 5px 9px;
+          }
           .summary-card,
           .chart-panel {
             background: #ffffff;
@@ -387,6 +424,25 @@ def portfolio_page() -> str:
                 <h1>Portfolio Analysis</h1>
                 <p>Indicative P&amp;L, allocation, and performance history</p>
               </section>
+              <section class="dashboard-controls" aria-label="Dashboard filters">
+                <label class="date-filter" for="history-range">
+                  Display range
+                  <select id="history-range">
+                    <option value="30" selected>Last 1 month</option>
+                    <option value="90">Last 3 months</option>
+                    <option value="ytd">YTD</option>
+                    <option value="all">All</option>
+                  </select>
+                </label>
+                <div class="freshness-labels" aria-label="IBKR query freshness">
+                  <span class="freshness-label" id="positions-refresh-time">
+                    Positions query: --
+                  </span>
+                  <span class="freshness-label" id="history-refresh-time">
+                    History query: --
+                  </span>
+                </div>
+              </section>
               <section class="kpi-grid" aria-label="Portfolio summary">
                 <article class="kpi-card">
                   <div class="kpi-label">NAV</div>
@@ -488,6 +544,23 @@ def portfolio_page() -> str:
             '#2563eb', '#0f766e', '#ca8a04', '#dc2626', '#7c3aed',
             '#0891b2', '#4d7c0f', '#c2410c', '#475569', '#be185d'
           ];
+          let selectedHistoryDays = 30;
+
+          function daysForRange(value) {
+            if (value === 'all') {
+              return null;
+            }
+            if (value === 'ytd') {
+              const now = new Date();
+              const start = new Date(now.getFullYear(), 0, 1);
+              return Math.max(1, Math.ceil((now - start) / 86400000) + 1);
+            }
+            return Number(value);
+          }
+
+          function rangeQuery() {
+            return selectedHistoryDays === null ? '' : `?days=${selectedHistoryDays}`;
+          }
 
           function escapeHtml(value) {
             return String(value)
@@ -571,7 +644,7 @@ def portfolio_page() -> str:
           }
 
           async function loadDailyPnl() {
-            const response = await fetch('/analysis/daily-pnl?days=90');
+            const response = await fetch(`/analysis/daily-pnl${rangeQuery()}`);
             if (!response.ok) {
               throw new Error(`Daily P&L request failed (${response.status})`);
             }
@@ -687,6 +760,7 @@ def portfolio_page() -> str:
                 loadCurrentPortfolio(),
                 loadPerformance(),
                 loadDailyPnl(),
+                loadRefreshStatus(),
               ]);
               if (reloadResults.some((result) => result.status === 'rejected')) {
                 status.textContent = 'Positions refreshed, but some panels failed to reload.';
@@ -721,6 +795,7 @@ def portfolio_page() -> str:
                 loadPerformance(),
                 loadDailyPnl(),
                 loadBrokerDailyPnl(),
+                loadRefreshStatus(),
               ]);
               if (reloadResults.some((result) => result.status === 'rejected')) {
                 status.textContent = 'History refreshed, but some panels failed to reload.';
@@ -732,7 +807,7 @@ def portfolio_page() -> str:
           }
 
           async function loadPerformance() {
-            const response = await fetch('/analysis/performance');
+            const response = await fetch(`/analysis/performance${rangeQuery()}`);
             const payload = await response.json();
 
             for (const field of fieldConfig.summary) {
@@ -762,6 +837,34 @@ def portfolio_page() -> str:
               }).join('');
               return `<tr>${cells}</tr>`;
             }).join('');
+          }
+
+          function formatTimestamp(value) {
+            if (!value) {
+              return '--';
+            }
+            const date = new Date(value);
+            if (Number.isNaN(date.getTime())) {
+              return value;
+            }
+            return new Intl.DateTimeFormat(undefined, {
+              month: 'short',
+              day: 'numeric',
+              hour: '2-digit',
+              minute: '2-digit',
+            }).format(date);
+          }
+
+          async function loadRefreshStatus() {
+            const response = await fetch('/analysis/refresh/status');
+            if (!response.ok) {
+              throw new Error(`Refresh status request failed (${response.status})`);
+            }
+            const payload = await response.json();
+            document.getElementById('positions-refresh-time').textContent =
+              `Positions query: ${formatTimestamp(payload.last_positions_refreshed_at)}`;
+            document.getElementById('history-refresh-time').textContent =
+              `History query: ${formatTimestamp(payload.last_history_refreshed_at)}`;
           }
 
           function renderNavChart(points) {
@@ -904,6 +1007,19 @@ def portfolio_page() -> str:
                 </td>
               </tr>
             `;
+          });
+          loadRefreshStatus().catch(() => {
+            document.getElementById('positions-refresh-time').textContent =
+              'Positions query: unavailable';
+            document.getElementById('history-refresh-time').textContent =
+              'History query: unavailable';
+          });
+          document.getElementById('history-range').addEventListener('change', (event) => {
+            selectedHistoryDays = daysForRange(event.target.value);
+            Promise.allSettled([
+              loadPerformance(),
+              loadDailyPnl(),
+            ]);
           });
           document.getElementById('refresh-positions')
             .addEventListener('click', refreshPositions);

@@ -58,6 +58,8 @@ Clock = Callable[[], datetime]
 
 LAST_ATTEMPTED_AT_KEY = "ibkr_full_refresh_last_attempted_at"
 LAST_COMPLETED_AT_KEY = "ibkr_full_refresh_last_completed_at"
+LAST_POSITIONS_COMPLETED_AT_KEY = "ibkr_positions_refresh_last_completed_at"
+LAST_HISTORY_COMPLETED_AT_KEY = "ibkr_history_refresh_last_completed_at"
 
 
 class FullRefreshWorkflow:
@@ -83,7 +85,12 @@ class FullRefreshWorkflow:
         position_import = self._import_positions()
         history_import = self._import_history()
         dashboard_refresh = self._refresh_dashboard()
-        self._record_success()
+        self._record_success(
+            extra_keys=(
+                LAST_POSITIONS_COMPLETED_AT_KEY,
+                LAST_HISTORY_COMPLETED_AT_KEY,
+            )
+        )
         return FullRefreshResult(
             position_import=position_import,
             history_import=history_import,
@@ -94,7 +101,7 @@ class FullRefreshWorkflow:
         self._record_attempt_or_raise_cooldown()
         position_import = self._import_positions()
         dashboard_refresh = self._refresh_dashboard()
-        self._record_success()
+        self._record_success(extra_keys=(LAST_POSITIONS_COMPLETED_AT_KEY,))
         return PositionRefreshResult(
             position_import=position_import,
             dashboard_refresh=dashboard_refresh,
@@ -103,7 +110,7 @@ class FullRefreshWorkflow:
     def run_history(self) -> IbkrHistoryImportResult:
         self._record_attempt_or_raise_cooldown()
         history_import = self._import_history()
-        self._record_success()
+        self._record_success(extra_keys=(LAST_HISTORY_COMPLETED_AT_KEY,))
         return history_import
 
     def _import_positions(self) -> BrokerImportResult:
@@ -150,14 +157,15 @@ class FullRefreshWorkflow:
             repository.set(LAST_ATTEMPTED_AT_KEY, now.isoformat())
             session.commit()
 
-    def _record_success(self) -> None:
+    def _record_success(self, *, extra_keys: tuple[str, ...] = ()) -> None:
         if self.settings.ibkr_flex_refresh_cooldown_seconds <= 0:
             return
         with self.session_factory.session() as session:
-            AppSettingRepository(session).set(
-                LAST_COMPLETED_AT_KEY,
-                _normalize_utc(self.clock()).isoformat(),
-            )
+            repository = AppSettingRepository(session)
+            completed_at = _normalize_utc(self.clock()).isoformat()
+            repository.set(LAST_COMPLETED_AT_KEY, completed_at)
+            for key in extra_keys:
+                repository.set(key, completed_at)
             session.commit()
 
 

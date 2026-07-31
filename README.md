@@ -29,7 +29,7 @@ The repository has a working end-to-end MVP rather than only scaffolding.
 | Finance analysis | Technical, candlestick, and market-risk skills with deterministic summaries |
 | Daily review | Portfolio snapshot, signals, finance evidence, and Notion synchronization |
 | Operations | Provider-run records, transaction ledger, and broker NAV/cash reconciliation records |
-| Browser/API | Current portfolio, performance, history, operations, and workflow endpoints |
+| Browser/API | Portfolio dashboard, split IBKR refresh buttons, query freshness labels, position chart, operations, and workflow endpoints |
 | Trade execution | Intentionally not implemented |
 
 The current analytics are useful for daily monitoring, but returns and drawdown are not yet
