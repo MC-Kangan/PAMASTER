@@ -1,57 +1,79 @@
 # UGREEN NAS prebuilt Docker deployment guide
 
-This guide records the deployment path that avoids relying on Git or source-code builds on the
-UGREEN NAS:
+This is the canonical deployment path for running PA Investing on the UGREEN NAS without Git or
+source-code builds on the NAS.
 
 ```text
 build backend image on Mac
-→ export Docker image tar
-→ copy tar to NAS
+→ save Docker image tar
+→ copy tar + LAN Compose file to NAS
 → import image in UGREEN Docker
 → create/update Docker Project from Compose
-→ run migrations and broker imports inside the backend container
+→ run migrations
+→ open dashboard and use browser refresh buttons
 ```
 
-Do not put credentials inside the Docker image. The image contains application code only. Keep
-IBKR, Notion, database, and dashboard credentials in the NAS Docker project environment or NAS
-`.env` file.
+The Docker image contains application code only. Do not put credentials inside the image. Keep
+IBKR, Notion, PostgreSQL, and dashboard credentials in the UGREEN Docker Project environment.
+
+## 0. Files and compose variant
+
+Use this Compose file for the current UGREEN Docker app / LAN testing path:
+
+```text
+backend/docker-compose.ugreen-lan.yml
+```
+
+It publishes the app with:
+
+```yaml
+ports:
+  - "${PA_NAS_HTTP_PORT:-8000}:8000"
+```
+
+Do not set `PA_BIND_ADDRESS` for this path. That older variable belongs to loopback/private-proxy
+compose files and caused the previous “works inside container but not from Mac” confusion.
 
 ## 1. Build the backend image on Mac
 
-Start Docker Desktop on the Mac first. Then:
+Start Docker Desktop on the Mac first. Then run:
 
 ```bash
 cd /Users/chenkangan/Documents/PAMASTER/backend
 
-docker build \
-  --platform linux/amd64 \
-  -t pa-investing-backend:f37701c .
-
-docker save \
-  pa-investing-backend:f37701c \
-  -o pa-investing-backend-f37701c.tar
+tag=$(git rev-parse --short HEAD)
+docker build --platform linux/amd64 -t "pa-investing-backend:${tag}" .
+docker save "pa-investing-backend:${tag}" -o "pa-investing-backend-${tag}.tar"
+echo "Built pa-investing-backend:${tag}"
 ```
 
-Use `linux/amd64` for the UGREEN DXP4800 Plus. If deploying a newer commit later, replace
-`f37701c` with the new short commit hash and use the same tag consistently.
+Use `linux/amd64` for the UGREEN DXP4800 Plus.
 
-The output tar is a local deployment artifact:
+The output tar is a local deployment artifact, for example:
 
 ```text
-backend/pa-investing-backend-f37701c.tar
+backend/pa-investing-backend-d535cef.tar
 ```
 
-Do not commit this tar file.
+Do not commit Docker image tar files.
 
-## 2. Copy the image tar to NAS
+## 2. Copy two deployment files to NAS
 
-Copy the tar file to a NAS folder visible from the UGREEN Docker app, for example:
+Copy these two files to a NAS folder visible from the UGREEN Docker app:
 
 ```text
-/volume1/docker/images/pa-investing-backend-f37701c.tar
+backend/pa-investing-backend-<tag>.tar
+backend/docker-compose.ugreen-lan.yml
 ```
 
-SMB, UGREEN file manager, or NAS folder sync are fine for copying this tar file. This is a built
+For example:
+
+```text
+/volume1/docker/images/pa-investing-backend-<tag>.tar
+/volume1/docker/pa-investing/docker-compose.ugreen-lan.yml
+```
+
+SMB, UGREEN file manager, or NAS folder sync are fine for copying these files. The tar is a built
 artifact, not a live source-code deployment folder.
 
 ## 3. Import the image in UGREEN Docker
@@ -65,17 +87,18 @@ In the UGREEN Docker app:
 Select:
 
 ```text
-pa-investing-backend-f37701c.tar
+pa-investing-backend-<tag>.tar
 ```
 
 After import, local images should show:
 
 ```text
-pa-investing-backend:f37701c
+pa-investing-backend:<tag>
 ```
 
 If the image appears as `<none>` or `镜像异常`, the import did not produce a usable tagged image.
-Rebuild and re-export the tar from Docker Desktop, then import again.
+Delete that imported image, rebuild and re-export the tar from Docker Desktop, then import again.
+Do not create/update the project until the image is healthy.
 
 ## 4. Create or update the UGREEN Docker Project
 
@@ -84,52 +107,39 @@ Use Docker Project / Compose rather than manually creating a single container. T
 - `backend-api`
 - `postgres`
 
-Use the repo file:
+In UGREEN Docker:
+
+1. Go to `项目` / `Projects`.
+2. Create a new project or edit the existing `pa-investing` project.
+3. Import/use `docker-compose.ugreen-lan.yml`.
+4. Set the environment values in the project editor.
+5. Start or recreate the project.
+
+The important image setting is:
 
 ```text
-backend/docker-compose.prebuilt.yml
+PA_BACKEND_IMAGE=pa-investing-backend:<tag>
 ```
 
-The important backend setting is:
+For this LAN Compose file, port exposure is controlled by:
 
 ```text
-PA_BACKEND_IMAGE=pa-investing-backend:f37701c
+PA_NAS_HTTP_PORT=8000
 ```
 
-For LAN testing, expose the backend with:
-
-```yaml
-ports:
-  - "0.0.0.0:8000:8000"
-```
-
-If the Compose file uses:
-
-```yaml
-ports:
-  - "${PA_BIND_ADDRESS:-127.0.0.1}:8000:8000"
-```
-
-then set:
-
-```text
-PA_BIND_ADDRESS=0.0.0.0
-```
-
-A simple restart may not apply port-binding changes. Recreate/redeploy the project after changing
-ports or bind addresses.
+Do not add `PA_BIND_ADDRESS` to this project.
 
 ## 5. Required NAS environment values
 
-Set these in the UGREEN Docker Project environment or NAS `.env` file:
+Set these in the UGREEN Docker Project environment:
 
 ```text
-PA_BACKEND_IMAGE=pa-investing-backend:f37701c
+PA_BACKEND_IMAGE=pa-investing-backend:<tag>
 PA_POSTGRES_PASSWORD=<long unique password>
 
 PA_IBKR_FLEX_TOKEN=<IBKR Flex token>
 PA_IBKR_FLEX_QUERY_ID=<current positions Flex Query ID>
-PA_IBKR_FLEX_HISTORY_QUERY_ID=1583705
+PA_IBKR_FLEX_HISTORY_QUERY_ID=<YTD daily history Flex Query ID>
 PA_IBKR_FLEX_TIMEZONE=Europe/London
 PA_IBKR_FLEX_REFRESH_COOLDOWN_SECONDS=900
 PA_MARKET_DATA_RECONCILIATION_TOLERANCE=0.01
@@ -139,11 +149,12 @@ PA_ANALYTICS_AUTH_USERNAME=<dashboard username>
 PA_ANALYTICS_AUTH_PASSWORD=<dashboard password>
 PA_WORKFLOW_API_TOKEN=<long unique token>
 
-PA_DEFAULT_BASE_CURRENCY=USD
-PA_BIND_ADDRESS=0.0.0.0
+PA_DEFAULT_BASE_CURRENCY=GBP
+PA_NAS_HTTP_PORT=8000
 ```
 
-Optional Notion and market-data values, if using the existing Notion refresh stack:
+Optional Notion and market-data values, if using the existing Notion refresh stack and live market
+data:
 
 ```text
 PA_NOTION_ENABLED=true
@@ -158,7 +169,35 @@ PA_MARKET_DATA_PROVIDER=twelve_data
 PA_TWELVE_DATA_API_KEY=<Twelve Data key>
 ```
 
-## 6. Verify the backend is reachable
+Use distinct secrets for PostgreSQL, dashboard auth, and workflow token. Do not reuse the IBKR,
+Notion, NAS administrator, or Tailscale credentials.
+
+## 6. Run database migrations
+
+Run migrations once after creating a fresh project or deploying an image that includes new
+migrations:
+
+```bash
+alembic upgrade head
+```
+
+In UGREEN Docker this is usually done from the `backend-api` container terminal.
+
+If UGREEN only gives you container command fields, temporarily run the backend image with command:
+
+```text
+alembic upgrade head
+```
+
+Wait for it to finish successfully, then restore the normal API command:
+
+```text
+uvicorn pa_investing.main:app --host 0.0.0.0 --port 8000
+```
+
+If the database is already migrated, Alembic may print no upgrade lines.
+
+## 7. Verify the backend is reachable
 
 Find the NAS IP from:
 
@@ -185,74 +224,91 @@ Expected:
 ```
 
 If it works inside the backend container but not from the Mac, the app is healthy and the issue is
-NAS port binding. Check the container/project port mapping. It should expose NAS port `8000` to
-container port `8000`.
+NAS port mapping. Check that the project uses `docker-compose.ugreen-lan.yml` and exposes NAS port
+`8000` to container port `8000`.
 
-## 7. Run database migrations
+## 8. Open the dashboard
 
-Open a terminal/exec session in the `pa-investing-backend-api-1` container and run:
+From a Mac or phone on the same LAN:
+
+```text
+http://192.168.1.137:8000/analysis/portfolio
+```
+
+If analytics auth is enabled, use:
+
+```text
+PA_ANALYTICS_AUTH_USERNAME
+PA_ANALYTICS_AUTH_PASSWORD
+```
+
+The Portfolio page should show:
+
+- current NAV and allocation;
+- P&L Calendar with a default one-month display range;
+- Performance History with the same display range;
+- `Positions query` and `History query` freshness labels;
+- buttons for `Refresh Positions` and `Refresh History`.
+
+## 9. First browser refresh
+
+Use the browser buttons instead of opening the Docker terminal for normal manual refreshes:
+
+1. Click `Refresh Positions`.
+2. Confirm the status mentions positions and trades.
+3. Wait for the IBKR cooldown, usually 15 minutes.
+4. Click `Refresh History`.
+5. Confirm the `Positions query` and `History query` freshness labels updated.
+6. Confirm the P&L Calendar and Latest Broker P&L Contributors show the latest broker report date
+   available from IBKR.
+
+`Refresh Positions` imports current positions, closed positions, and trade executions, then
+refreshes the dashboard snapshot. `Refresh History` imports YTD broker NAV and daily MTM P&L.
+Those are intentionally separate because IBKR Flex rate-limits back-to-back requests from the same
+token.
+
+## 10. Optional terminal diagnostics
+
+If browser refresh fails and you have a backend container terminal, inspect environment values:
 
 ```bash
-alembic upgrade head
+python - <<'PY'
+import os
+for k in [
+    "PA_IBKR_FLEX_TOKEN",
+    "PA_IBKR_FLEX_QUERY_ID",
+    "PA_IBKR_FLEX_HISTORY_QUERY_ID",
+    "PA_IBKR_FLEX_TIMEZONE",
+]:
+    v = os.environ.get(k, "")
+    print(k, "set" if v else "MISSING", v[:4] + "..." if v else "")
+PY
 ```
 
-Expected migration evidence for the broker P&L deployment:
+Import current positions manually:
 
-```text
-Running upgrade 0009_historical_market_data -> 0010_broker_daily_pnl
-Running upgrade 0010_broker_daily_pnl -> 0011_broker_daily_nav
+```bash
+python -m pa_investing.scripts.import_ibkr_positions --source flex
 ```
 
-If the database is already migrated, Alembic may print no upgrade lines.
-
-## 8. Import IBKR without manual downloads
-
-The correct unattended path is IBKR Flex Web Service:
-
-```text
-PA_IBKR_FLEX_TOKEN
-PA_IBKR_FLEX_QUERY_ID
-PA_IBKR_FLEX_HISTORY_QUERY_ID
-```
-
-`PA_IBKR_FLEX_HISTORY_QUERY_ID` should point to the saved Activity Flex Query:
-
-```text
-PA History YTD Daily XML
-Query ID: 1583705
-Account: U24549379
-Period: Year to Date
-Format: XML
-Breakout by Day: Yes
-```
-
-The query must include these sections for the dashboard:
-
-- `Change in NAV`
-- `Mark-to-Market Performance Summary in Base`
-- `Month & Year to Date Performance Summary in Base`
-- `Open Positions`
-- `Trades`
-- `Financial Instrument Information`
-
-Run inside the backend container:
+Import YTD broker history manually:
 
 ```bash
 python -m pa_investing.scripts.import_ibkr_history
 ```
 
-Expected healthy result:
+Expected healthy history result resembles:
 
 ```text
 IBKR history import completed: accounts=1 snapshots=148 nav_points=148 pnl_points=1166
 ```
 
-Counts will move over time. The important checks are:
+Counts move over time. The important checks are:
 
-- `accounts=1`
-- `snapshots` and `nav_points` are non-zero
-- `pnl_points` is much larger than `21`
-- the account is `U24549379`
+- `accounts` is non-zero;
+- `snapshots` and `nav_points` are non-zero;
+- `pnl_points` is much larger than `21`;
+- the saved history query is for the correct account.
 
 If the import returns no rows, save raw XML for diagnosis:
 
@@ -299,74 +355,33 @@ MTMPerformanceSummaryUnderlying 1166
 statement {'accountId': 'U24549379', ...}
 ```
 
-If the account is wrong, fix the saved Flex Query account selection in IBKR. The previous failure
-case was caused by the Web Service query returning account `U24549380` while the useful data was in
-`U24549379`.
+If the account is wrong, fix the saved Flex Query account selection in IBKR. A previous failure
+case was caused by the Web Service query returning the wrong account while the useful data was in
+another account.
 
-## 9. Import current positions
+## 11. Scheduled refresh
 
-Run inside the backend container:
+For now, the lowest-friction manual NAS operation is the browser flow:
+
+```text
+Refresh Positions → wait 15 minutes → Refresh History
+```
+
+If you later configure UGOS scheduled tasks and the NAS has Docker Compose terminal support, use
+commands based on `docker-compose.ugreen-lan.yml`, not the old prebuilt file:
 
 ```bash
-python -m pa_investing.scripts.import_ibkr_positions --source flex
+cd /volume1/docker/pa-investing/backend && docker compose -f docker-compose.ugreen-lan.yml exec -T backend-api python -m pa_investing.scripts.import_ibkr_positions --source flex
 ```
 
-This uses:
-
-```text
-PA_IBKR_FLEX_QUERY_ID
-```
-
-Keep this separate from:
-
-```text
-PA_IBKR_FLEX_HISTORY_QUERY_ID
-```
-
-The first is for current positions. The second is for YTD daily broker NAV/P&L history.
-
-## 10. Test dashboard URLs
-
-From the Mac:
-
-```text
-http://192.168.1.137:8000/analysis/portfolio
-http://192.168.1.137:8000/analysis/daily-pnl?days=220
-```
-
-If analytics auth is enabled, use:
-
-```text
-PA_ANALYTICS_AUTH_USERNAME
-PA_ANALYTICS_AUTH_PASSWORD
-```
-
-## 11. Schedule unattended IBKR refresh
-
-Use UGREEN scheduled task / task scheduler. Run as a NAS account that can operate Docker.
-
-Recommended daily command after markets/data are available:
+Then wait for the IBKR cooldown before running history:
 
 ```bash
-cd /volume1/docker/pa-investing/backend && docker compose -f docker-compose.prebuilt.yml exec -T backend-api python -m pa_investing.scripts.import_ibkr_positions --source flex && docker compose -f docker-compose.prebuilt.yml exec -T backend-api python -m pa_investing.scripts.import_ibkr_history && docker compose -f docker-compose.prebuilt.yml exec -T backend-api python -m pa_investing.scripts.run_scheduled_snapshot
+cd /volume1/docker/pa-investing/backend && docker compose -f docker-compose.ugreen-lan.yml exec -T backend-api python -m pa_investing.scripts.import_ibkr_history
 ```
 
-The `&&` chaining is intentional. If IBKR import fails, the later refresh should not pretend the
-full cycle succeeded.
-
-For broker P&L only:
-
-```bash
-cd /volume1/docker/pa-investing/backend && docker compose -f docker-compose.prebuilt.yml exec -T backend-api python -m pa_investing.scripts.import_ibkr_history
-```
-
-No IBKR browser login or manual XML download is required for scheduled runs as long as:
-
-- the Flex token is valid;
-- the saved query IDs are correct;
-- the saved history query account is `U24549379`;
-- the query format is XML;
-- the history query period includes available report dates.
+Do not chain positions and history immediately unless IBKR rate limiting is no longer an issue for
+your token.
 
 ## 12. Common failure modes
 
@@ -380,56 +395,50 @@ Fix:
 镜像 → 本地镜像 → 添加镜像 → 从NAS导入
 ```
 
-Verify:
+Verify the imported image tag matches `PA_BACKEND_IMAGE` exactly:
 
 ```text
-pa-investing-backend:f37701c
-```
-
-matches:
-
-```text
-PA_BACKEND_IMAGE=pa-investing-backend:f37701c
+pa-investing-backend:<tag>
+PA_BACKEND_IMAGE=pa-investing-backend:<tag>
 ```
 
 ### `/health` works inside container but not from Mac
 
-The app is healthy; the problem is NAS port binding.
+The app is healthy; the problem is NAS port mapping.
 
-Use:
+Use `docker-compose.ugreen-lan.yml` and ensure the project maps:
 
 ```yaml
 ports:
-  - "0.0.0.0:8000:8000"
+  - "${PA_NAS_HTTP_PORT:-8000}:8000"
 ```
 
-Redeploy/recreate the project, then test:
+Recreate the project after changing ports, then test:
 
 ```bash
 curl -v http://192.168.1.137:8000/health
 ```
 
+### `IBKR Flex request failed (1018): Too many requests`
+
+IBKR is rate-limiting requests from the Flex token. Wait at least
+`PA_IBKR_FLEX_REFRESH_COOLDOWN_SECONDS`, normally 900 seconds, before running the other IBKR query.
+This is why the dashboard has separate `Refresh Positions` and `Refresh History` buttons.
+
 ### `IBKR history import returned no daily history rows`
 
-Check env inside the backend container:
+Most likely causes:
 
-```bash
-python - <<'PY'
-import os
-for k in [
-    "PA_IBKR_FLEX_TOKEN",
-    "PA_IBKR_FLEX_QUERY_ID",
-    "PA_IBKR_FLEX_HISTORY_QUERY_ID",
-]:
-    v = os.environ.get(k, "")
-    print(k, "set" if v else "MISSING", v[:4] + "..." if v else "")
-PY
-```
+- wrong `PA_IBKR_FLEX_HISTORY_QUERY_ID`;
+- saved history query uses the wrong IBKR account;
+- Flex query format is not XML;
+- query period has no available report dates;
+- the token is expired or recently recreated and not active yet.
 
-Then save and inspect raw XML as shown above. Most issues are wrong/missing query ID, wrong saved
-account, expired token, or a temporary empty IBKR Flex response.
+Use the raw XML diagnostic above. The history query should include daily `FlexStatement`,
+`ChangeInNAV`, and `MTMPerformanceSummaryUnderlying` rows.
 
-### Do not commit or sync these
+## 13. Do not commit or sync these
 
 Keep these out of Git and source folder sync:
 

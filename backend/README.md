@@ -583,10 +583,17 @@ never publish host port `5432`.
 
 ### UGREEN Docker App Deployment Checklist
 
-This is the default process for the current NAS deployment. Build the application image on the
-Mac, upload the resulting image archive to the NAS, and run it with
-`docker-compose.ugreen-lan.yml` in the UGREEN Docker app. This path does not use
-`PA_BIND_ADDRESS`; LAN exposure is controlled by `PA_NAS_HTTP_PORT`.
+This is the default process for the current NAS deployment. The canonical step-by-step guide is:
+
+```text
+../docs/ugreen-nas-prebuilt-docker-deployment-guide.md
+```
+
+In short: build the application image on the Mac, upload the image archive and
+`docker-compose.ugreen-lan.yml` to the NAS, import the image in UGREEN Docker, create/update the
+project from the LAN Compose file, run migrations, then test `/health`.
+
+This path does not use `PA_BIND_ADDRESS`; LAN exposure is controlled by `PA_NAS_HTTP_PORT`.
 
 #### 1. Build the image on the Mac
 
