@@ -379,7 +379,8 @@ def portfolio_page() -> str:
                 <div class="refresh-controls">
                   <span class="refresh-status" id="refresh-status"
                         aria-live="polite"></span>
-                  <button id="refresh-portfolio" type="button">Refresh</button>
+                  <button id="refresh-positions" type="button">Refresh Positions</button>
+                  <button id="refresh-history" type="button">Refresh History</button>
                 </div>
               </nav>
               <section class="intro">
@@ -626,53 +627,59 @@ def portfolio_page() -> str:
             `;
           }
 
-          async function refreshPortfolio() {
-            const button = document.getElementById('refresh-portfolio');
+          function refreshErrorDetail(payload, fallback) {
+            if (payload.detail?.message) {
+              const stage = payload.detail.stage
+                ? `${payload.detail.stage}: `
+                : '';
+              let detail = `${stage}${payload.detail.message}`;
+              if (payload.detail.retry_after_seconds) {
+                const minutes = Math.ceil(payload.detail.retry_after_seconds / 60);
+                detail = `${detail} (${minutes} min)`;
+              }
+              return detail;
+            }
+            return payload.detail || fallback;
+          }
+
+          async function postRefresh(path) {
+            const response = await fetch(path, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'X-PA-Request': 'refresh',
+              },
+              body: JSON.stringify({}),
+            });
+            if (!response.ok) {
+              let detail = `Request failed (${response.status})`;
+              try {
+                detail = refreshErrorDetail(await response.json(), detail);
+              } catch (_) {
+                // Keep the HTTP status message when the response is not JSON.
+              }
+              throw new Error(detail);
+            }
+            return response.json();
+          }
+
+          async function refreshPositions() {
+            const button = document.getElementById('refresh-positions');
             const status = document.getElementById('refresh-status');
             button.disabled = true;
             button.setAttribute('aria-busy', 'true');
-            status.textContent = 'Refreshing portfolio...';
+            status.textContent = 'Refreshing IBKR positions...';
             try {
               try {
-                const response = await fetch('/analysis/refresh', {
-                  method: 'POST',
-                  headers: {
-                    'Content-Type': 'application/json',
-                    'X-PA-Request': 'refresh',
-                  },
-                  body: JSON.stringify({}),
-                });
-                if (!response.ok) {
-                  let detail = `Request failed (${response.status})`;
-                  try {
-                    const payload = await response.json();
-                    if (payload.detail?.message) {
-                      const stage = payload.detail.stage
-                        ? `${payload.detail.stage}: `
-                        : '';
-                      detail = `${stage}${payload.detail.message}`;
-                      if (payload.detail.retry_after_seconds) {
-                        const minutes = Math.ceil(payload.detail.retry_after_seconds / 60);
-                        detail = `${detail} (${minutes} min)`;
-                      }
-                    } else {
-                      detail = payload.detail || detail;
-                    }
-                  } catch (_) {
-                    // Keep the HTTP status message when the response is not JSON.
-                  }
-                  throw new Error(detail);
-                }
-                const refreshPayload = await response.json();
+                const refreshPayload = await postRefresh('/analysis/refresh/positions');
+                const positions = refreshPayload.position_import.positions_imported;
                 status.textContent = [
-                  `IBKR refreshed: ${refreshPayload.position_import.positions_imported} positions`,
+                  `Positions refreshed: ${positions} positions`,
                   `${refreshPayload.position_import.transactions_imported} trades`,
-                  `${refreshPayload.history_import.nav_points_imported} NAV points`,
-                  `${refreshPayload.history_import.pnl_points_imported} P&L points.`,
                   'Dashboard refreshed.',
                 ].join(', ');
               } catch (error) {
-                status.textContent = `Refresh failed: ${error.message}`;
+                status.textContent = `Positions refresh failed: ${error.message}`;
                 return;
               }
 
@@ -680,10 +687,43 @@ def portfolio_page() -> str:
                 loadCurrentPortfolio(),
                 loadPerformance(),
                 loadDailyPnl(),
+              ]);
+              if (reloadResults.some((result) => result.status === 'rejected')) {
+                status.textContent = 'Positions refreshed, but some panels failed to reload.';
+              }
+            } finally {
+              button.disabled = false;
+              button.removeAttribute('aria-busy');
+            }
+          }
+
+          async function refreshHistory() {
+            const button = document.getElementById('refresh-history');
+            const status = document.getElementById('refresh-status');
+            button.disabled = true;
+            button.setAttribute('aria-busy', 'true');
+            status.textContent = 'Refreshing IBKR history...';
+            try {
+              let refreshPayload;
+              try {
+                refreshPayload = await postRefresh('/analysis/refresh/history');
+                const navPoints = refreshPayload.history_import.nav_points_imported;
+                status.textContent = [
+                  `History refreshed: ${navPoints} NAV points`,
+                  `${refreshPayload.history_import.pnl_points_imported} P&L points.`,
+                ].join(', ');
+              } catch (error) {
+                status.textContent = `History refresh failed: ${error.message}`;
+                return;
+              }
+
+              const reloadResults = await Promise.allSettled([
+                loadPerformance(),
+                loadDailyPnl(),
                 loadBrokerDailyPnl(),
               ]);
               if (reloadResults.some((result) => result.status === 'rejected')) {
-                status.textContent = 'Portfolio refreshed, but some panels failed to reload.';
+                status.textContent = 'History refreshed, but some panels failed to reload.';
               }
             } finally {
               button.disabled = false;
@@ -865,8 +905,10 @@ def portfolio_page() -> str:
               </tr>
             `;
           });
-          document.getElementById('refresh-portfolio')
-            .addEventListener('click', refreshPortfolio);
+          document.getElementById('refresh-positions')
+            .addEventListener('click', refreshPositions);
+          document.getElementById('refresh-history')
+            .addEventListener('click', refreshHistory);
         </script>
       </body>
     </html>

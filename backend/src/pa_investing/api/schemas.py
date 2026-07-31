@@ -46,6 +46,18 @@ class BrowserRefreshResponse(BaseModel):
     notion_sync_enabled: bool
 
 
+class BrowserPositionRefreshResponse(BaseModel):
+    position_import: IbkrPositionImportResponse
+    snapshot_id: str
+    nav: str
+    signal_count: int
+    notion_sync_enabled: bool
+
+
+class BrowserHistoryRefreshResponse(BaseModel):
+    history_import: IbkrHistoryImportResponse
+
+
 class PerformancePointResponse(BaseModel):
     observed_at: datetime
     nav: str

@@ -119,6 +119,53 @@ def test_full_refresh_runs_positions_history_then_dashboard() -> None:
     assert result.dashboard_refresh.snapshot.snapshot_id == "snap-1"
 
 
+def test_positions_refresh_does_not_call_history_import() -> None:
+    calls: list[str] = []
+
+    def position_importer(**kwargs: object) -> BrokerImportResult:
+        calls.append("positions")
+        return successful_position_importer(**kwargs)
+
+    def history_importer(**kwargs: object) -> tuple[int, int, int, int]:
+        calls.append("history")
+        return successful_history_importer(**kwargs)
+
+    result = FullRefreshWorkflow(
+        settings=Settings(ibkr_flex_refresh_cooldown_seconds=0),
+        session_factory="session-factory",  # type: ignore[arg-type]
+        refresh_and_sync_workflow=StubRefreshAndSyncWorkflow(calls),  # type: ignore[arg-type]
+        position_importer=position_importer,
+        history_importer=history_importer,
+    ).run_positions()
+
+    assert calls == ["positions", "dashboard"]
+    assert result.position_import.positions_imported == 2
+    assert result.dashboard_refresh.snapshot.snapshot_id == "snap-1"
+
+
+def test_history_refresh_does_not_call_positions_or_dashboard() -> None:
+    calls: list[str] = []
+
+    def position_importer(**kwargs: object) -> BrokerImportResult:
+        calls.append("positions")
+        return successful_position_importer(**kwargs)
+
+    def history_importer(**kwargs: object) -> tuple[int, int, int, int]:
+        calls.append("history")
+        return successful_history_importer(**kwargs)
+
+    result = FullRefreshWorkflow(
+        settings=Settings(ibkr_flex_refresh_cooldown_seconds=0),
+        session_factory="session-factory",  # type: ignore[arg-type]
+        refresh_and_sync_workflow=StubRefreshAndSyncWorkflow(calls),  # type: ignore[arg-type]
+        position_importer=position_importer,
+        history_importer=history_importer,
+    ).run_history()
+
+    assert calls == ["history"]
+    assert result.nav_points_imported == 4
+
+
 def test_full_refresh_stops_when_positions_import_fails() -> None:
     calls: list[str] = []
 

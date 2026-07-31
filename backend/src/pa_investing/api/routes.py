@@ -29,6 +29,8 @@ from pa_investing.api.auth import (
 from pa_investing.api.schemas import (
     BrokerDailyPnlPointResponse,
     BrokerDailyPnlResponse,
+    BrowserHistoryRefreshResponse,
+    BrowserPositionRefreshResponse,
     BrowserRefreshResponse,
     CurrentHoldingResponse,
     CurrentPortfolioResponse,
@@ -84,10 +86,13 @@ from pa_investing.market_data.history.service import HistoricalDataService
 from pa_investing.notion.sync import PORTFOLIO_BASE_CURRENCY_KEY
 from pa_investing.presentation.fields import serialize_decimal
 from pa_investing.workflows.agent_api import DailyReviewResult
+from pa_investing.workflows.broker_import import BrokerImportResult
 from pa_investing.workflows.full_refresh import (
     FullRefreshCooldownError,
     FullRefreshError,
     FullRefreshWorkflow,
+    IbkrHistoryImportResult,
+    PositionRefreshResult,
 )
 from pa_investing.workflows.refresh_and_sync import RefreshAndSyncWorkflow
 
@@ -620,42 +625,117 @@ def browser_refresh_route(
     try:
         result = workflow.run()
     except FullRefreshCooldownError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-            detail={
-                "stage": exc.stage,
-                "message": str(exc),
-                "retry_after_seconds": exc.retry_after_seconds,
-            },
-        ) from exc
+        raise _full_refresh_cooldown(exc) from exc
     except FullRefreshError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail={
-                "stage": exc.stage,
-                "message": str(exc),
-            },
-        ) from exc
+        raise _full_refresh_unavailable(exc) from exc
 
     return BrowserRefreshResponse(
-        position_import=IbkrPositionImportResponse(
-            accounts_imported=result.position_import.accounts_imported,
-            positions_imported=result.position_import.positions_imported,
-            positions_closed=result.position_import.positions_closed,
-            skipped_positions=len(result.position_import.skipped_positions),
-            transactions_imported=result.position_import.transactions_imported,
-            reconciliations_imported=result.position_import.reconciliations_imported,
-            reconciliation_warnings=result.position_import.reconciliation_warnings,
-            cost_basis_available=result.position_import.cost_basis_available,
-            cost_basis_missing=result.position_import.cost_basis_missing,
-        ),
-        history_import=IbkrHistoryImportResponse(
-            accounts_imported=result.history_import.accounts_imported,
-            snapshots_imported=result.history_import.snapshots_imported,
-            nav_points_imported=result.history_import.nav_points_imported,
-            pnl_points_imported=result.history_import.pnl_points_imported,
-        ),
+        position_import=_position_import_response(result.position_import),
+        history_import=_history_import_response(result.history_import),
         **_refresh_response(result.dashboard_refresh, settings).model_dump(),
+    )
+
+
+@router.post(
+    "/analysis/refresh/positions",
+    response_model=BrowserPositionRefreshResponse,
+)
+def browser_refresh_positions_route(
+    _: Annotated[None, Depends(require_analytics_auth)],
+    _browser_request: Annotated[None, Depends(require_browser_refresh_request)],
+    workflow: Annotated[
+        FullRefreshWorkflow,
+        Depends(get_full_refresh_workflow),
+    ],
+    settings: Annotated[Settings, Depends(get_settings)],
+) -> BrowserPositionRefreshResponse:
+    try:
+        result = workflow.run_positions()
+    except FullRefreshCooldownError as exc:
+        raise _full_refresh_cooldown(exc) from exc
+    except FullRefreshError as exc:
+        raise _full_refresh_unavailable(exc) from exc
+
+    return _position_refresh_response(result, settings)
+
+
+@router.post(
+    "/analysis/refresh/history",
+    response_model=BrowserHistoryRefreshResponse,
+)
+def browser_refresh_history_route(
+    _: Annotated[None, Depends(require_analytics_auth)],
+    _browser_request: Annotated[None, Depends(require_browser_refresh_request)],
+    workflow: Annotated[
+        FullRefreshWorkflow,
+        Depends(get_full_refresh_workflow),
+    ],
+) -> BrowserHistoryRefreshResponse:
+    try:
+        result = workflow.run_history()
+    except FullRefreshCooldownError as exc:
+        raise _full_refresh_cooldown(exc) from exc
+    except FullRefreshError as exc:
+        raise _full_refresh_unavailable(exc) from exc
+
+    return BrowserHistoryRefreshResponse(
+        history_import=_history_import_response(result),
+    )
+
+
+def _position_refresh_response(
+    result: PositionRefreshResult,
+    settings: Settings,
+) -> BrowserPositionRefreshResponse:
+    return BrowserPositionRefreshResponse(
+        position_import=_position_import_response(result.position_import),
+        **_refresh_response(result.dashboard_refresh, settings).model_dump(),
+    )
+
+
+def _position_import_response(result: BrokerImportResult) -> IbkrPositionImportResponse:
+    return IbkrPositionImportResponse(
+        accounts_imported=result.accounts_imported,
+        positions_imported=result.positions_imported,
+        positions_closed=result.positions_closed,
+        skipped_positions=len(result.skipped_positions),
+        transactions_imported=result.transactions_imported,
+        reconciliations_imported=result.reconciliations_imported,
+        reconciliation_warnings=result.reconciliation_warnings,
+        cost_basis_available=result.cost_basis_available,
+        cost_basis_missing=result.cost_basis_missing,
+    )
+
+
+def _history_import_response(
+    result: IbkrHistoryImportResult,
+) -> IbkrHistoryImportResponse:
+    return IbkrHistoryImportResponse(
+        accounts_imported=result.accounts_imported,
+        snapshots_imported=result.snapshots_imported,
+        nav_points_imported=result.nav_points_imported,
+        pnl_points_imported=result.pnl_points_imported,
+    )
+
+
+def _full_refresh_cooldown(exc: FullRefreshCooldownError) -> HTTPException:
+    return HTTPException(
+        status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+        detail={
+            "stage": exc.stage,
+            "message": str(exc),
+            "retry_after_seconds": exc.retry_after_seconds,
+        },
+    )
+
+
+def _full_refresh_unavailable(exc: FullRefreshError) -> HTTPException:
+    return HTTPException(
+        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+        detail={
+            "stage": exc.stage,
+            "message": str(exc),
+        },
     )
 
 

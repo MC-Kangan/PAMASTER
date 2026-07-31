@@ -27,6 +27,12 @@ class FullRefreshResult:
     dashboard_refresh: DailyReviewResult
 
 
+@dataclass(frozen=True)
+class PositionRefreshResult:
+    position_import: BrokerImportResult
+    dashboard_refresh: DailyReviewResult
+
+
 class FullRefreshError(RuntimeError):
     def __init__(self, stage: str, error: Exception) -> None:
         self.stage = stage
@@ -74,8 +80,35 @@ class FullRefreshWorkflow:
 
     def run(self) -> FullRefreshResult:
         self._record_attempt_or_raise_cooldown()
+        position_import = self._import_positions()
+        history_import = self._import_history()
+        dashboard_refresh = self._refresh_dashboard()
+        self._record_success()
+        return FullRefreshResult(
+            position_import=position_import,
+            history_import=history_import,
+            dashboard_refresh=dashboard_refresh,
+        )
+
+    def run_positions(self) -> PositionRefreshResult:
+        self._record_attempt_or_raise_cooldown()
+        position_import = self._import_positions()
+        dashboard_refresh = self._refresh_dashboard()
+        self._record_success()
+        return PositionRefreshResult(
+            position_import=position_import,
+            dashboard_refresh=dashboard_refresh,
+        )
+
+    def run_history(self) -> IbkrHistoryImportResult:
+        self._record_attempt_or_raise_cooldown()
+        history_import = self._import_history()
+        self._record_success()
+        return history_import
+
+    def _import_positions(self) -> BrokerImportResult:
         try:
-            position_import = self.position_importer(
+            return self.position_importer(
                 settings=self.settings,
                 session_factory=self.session_factory,
                 verbose=False,
@@ -83,6 +116,7 @@ class FullRefreshWorkflow:
         except Exception as error:
             raise FullRefreshError("ibkr_positions", error) from error
 
+    def _import_history(self) -> IbkrHistoryImportResult:
         try:
             history_counts = self.history_importer(
                 settings=self.settings,
@@ -90,18 +124,13 @@ class FullRefreshWorkflow:
             )
         except Exception as error:
             raise FullRefreshError("ibkr_history", error) from error
+        return IbkrHistoryImportResult(*history_counts)
 
+    def _refresh_dashboard(self) -> DailyReviewResult:
         try:
-            dashboard_refresh = self.refresh_and_sync_workflow.run(stop_prices={})
+            return self.refresh_and_sync_workflow.run(stop_prices={})
         except Exception as error:
             raise FullRefreshError("dashboard_refresh", error) from error
-
-        self._record_success()
-        return FullRefreshResult(
-            position_import=position_import,
-            history_import=IbkrHistoryImportResult(*history_counts),
-            dashboard_refresh=dashboard_refresh,
-        )
 
     def _record_attempt_or_raise_cooldown(self) -> None:
         cooldown_seconds = max(0, self.settings.ibkr_flex_refresh_cooldown_seconds)

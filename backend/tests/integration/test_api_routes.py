@@ -61,6 +61,7 @@ from pa_investing.workflows.full_refresh import (
     FullRefreshError,
     FullRefreshResult,
     IbkrHistoryImportResult,
+    PositionRefreshResult,
 )
 
 
@@ -118,33 +119,58 @@ class FakeRefreshAndSyncWorkflow:
 class FakeFullRefreshWorkflow:
     def __init__(self, error: FullRefreshError | None = None) -> None:
         self.call_count = 0
+        self.positions_call_count = 0
+        self.history_call_count = 0
         self.error = error
+
+    def _position_import(self) -> BrokerImportResult:
+        return BrokerImportResult(
+            accounts_imported=1,
+            positions_imported=8,
+            positions_closed=2,
+            skipped_positions=[{"symbol": "OPT", "reason": "unsupported"}],
+            cost_basis_available=7,
+            cost_basis_missing=1,
+            transactions_imported=56,
+            reconciliations_imported=1,
+            reconciliation_warnings=1,
+        )
+
+    def _history_import(self) -> IbkrHistoryImportResult:
+        return IbkrHistoryImportResult(
+            accounts_imported=1,
+            snapshots_imported=151,
+            nav_points_imported=151,
+            pnl_points_imported=1166,
+        )
+
+    def _dashboard_refresh(self) -> DailyReviewResult:
+        return FakeRefreshAndSyncWorkflow(expected_stop_prices={}).run(stop_prices={})
 
     def run(self) -> FullRefreshResult:
         self.call_count += 1
         if self.error is not None:
             raise self.error
-        refresh_workflow = FakeRefreshAndSyncWorkflow(expected_stop_prices={})
         return FullRefreshResult(
-            position_import=BrokerImportResult(
-                accounts_imported=1,
-                positions_imported=8,
-                positions_closed=2,
-                skipped_positions=[{"symbol": "OPT", "reason": "unsupported"}],
-                cost_basis_available=7,
-                cost_basis_missing=1,
-                transactions_imported=56,
-                reconciliations_imported=1,
-                reconciliation_warnings=1,
-            ),
-            history_import=IbkrHistoryImportResult(
-                accounts_imported=1,
-                snapshots_imported=151,
-                nav_points_imported=151,
-                pnl_points_imported=1166,
-            ),
-            dashboard_refresh=refresh_workflow.run(stop_prices={}),
+            position_import=self._position_import(),
+            history_import=self._history_import(),
+            dashboard_refresh=self._dashboard_refresh(),
         )
+
+    def run_positions(self) -> PositionRefreshResult:
+        self.positions_call_count += 1
+        if self.error is not None:
+            raise self.error
+        return PositionRefreshResult(
+            position_import=self._position_import(),
+            dashboard_refresh=self._dashboard_refresh(),
+        )
+
+    def run_history(self) -> IbkrHistoryImportResult:
+        self.history_call_count += 1
+        if self.error is not None:
+            raise self.error
+        return self._history_import()
 
 
 class FakeInstrumentResolutionService:
@@ -891,6 +917,94 @@ def test_browser_refresh_route_returns_refresh_and_sync_summary() -> None:
     }
 
 
+def test_browser_refresh_positions_route_returns_position_summary() -> None:
+    app = create_app()
+    app.dependency_overrides[get_settings] = lambda: Settings(
+        analytics_auth_enabled=False,
+    )
+    workflow = FakeFullRefreshWorkflow()
+    app.dependency_overrides[get_full_refresh_workflow] = lambda: workflow
+
+    response = TestClient(app).post(
+        "/analysis/refresh/positions",
+        json={},
+        headers={"X-PA-Request": "refresh"},
+    )
+
+    assert response.status_code == 200
+    assert workflow.positions_call_count == 1
+    assert workflow.history_call_count == 0
+    assert workflow.call_count == 0
+    assert response.json() == {
+        "position_import": {
+            "accounts_imported": 1,
+            "positions_imported": 8,
+            "positions_closed": 2,
+            "skipped_positions": 1,
+            "transactions_imported": 56,
+            "reconciliations_imported": 1,
+            "reconciliation_warnings": 1,
+            "cost_basis_available": 7,
+            "cost_basis_missing": 1,
+        },
+        "snapshot_id": "snap-123",
+        "nav": "1750",
+        "signal_count": 1,
+        "notion_sync_enabled": False,
+    }
+
+
+def test_browser_refresh_history_route_returns_history_summary() -> None:
+    app = create_app()
+    app.dependency_overrides[get_settings] = lambda: Settings(
+        analytics_auth_enabled=False,
+    )
+    workflow = FakeFullRefreshWorkflow()
+    app.dependency_overrides[get_full_refresh_workflow] = lambda: workflow
+
+    response = TestClient(app).post(
+        "/analysis/refresh/history",
+        json={},
+        headers={"X-PA-Request": "refresh"},
+    )
+
+    assert response.status_code == 200
+    assert workflow.history_call_count == 1
+    assert workflow.positions_call_count == 0
+    assert workflow.call_count == 0
+    assert response.json() == {
+        "history_import": {
+            "accounts_imported": 1,
+            "snapshots_imported": 151,
+            "nav_points_imported": 151,
+            "pnl_points_imported": 1166,
+        }
+    }
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/analysis/refresh/positions",
+        "/analysis/refresh/history",
+    ],
+)
+def test_split_browser_refresh_routes_reject_missing_request_marker(path: str) -> None:
+    app = create_app()
+    app.dependency_overrides[get_settings] = lambda: Settings(
+        analytics_auth_enabled=False,
+    )
+    workflow = FakeFullRefreshWorkflow()
+    app.dependency_overrides[get_full_refresh_workflow] = lambda: workflow
+
+    response = TestClient(app).post(path, json={})
+
+    assert response.status_code == 403
+    assert workflow.call_count == 0
+    assert workflow.positions_call_count == 0
+    assert workflow.history_call_count == 0
+
+
 def test_browser_refresh_route_rejects_missing_request_marker_without_running_workflow() -> None:
     app = create_app()
     app.dependency_overrides[get_settings] = lambda: Settings(
@@ -1100,16 +1214,19 @@ def test_performance_analysis_page_renders() -> None:
     assert 'id="performance-body"' in response.text
     assert "overflow-wrap: anywhere;" in response.text
     assert 'id="portfolio-tab"' in response.text
-    assert 'id="refresh-portfolio"' in response.text
+    assert 'id="refresh-positions"' in response.text
+    assert 'id="refresh-history"' in response.text
     assert 'id="dtd-pnl-amount"' in response.text
     assert 'id="dtd-pnl-percent"' in response.text
     assert 'id="pnl-calendar"' in response.text
     assert "Indicative P&amp;L" in response.text
     assert "fetch('/analysis/daily-pnl?days=90')" in response.text
-    assert "fetch('/analysis/refresh'" in response.text
+    assert "postRefresh('/analysis/refresh/positions')" in response.text
+    assert "postRefresh('/analysis/refresh/history')" in response.text
     assert "'X-PA-Request': 'refresh'" in response.text
     assert "Promise.allSettled" in response.text
-    assert "Portfolio refreshed, but some panels failed to reload." in response.text
+    assert "Positions refreshed, but some panels failed to reload." in response.text
+    assert "History refreshed, but some panels failed to reload." in response.text
     assert "Broker-reported daily P&L uses IBKR Change in NAV MTM." in response.text
     assert 'role="grid"' not in response.text
     assert 'role="columnheader"' not in response.text
