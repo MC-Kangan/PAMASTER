@@ -568,10 +568,18 @@ The canonical NAS project location is:
 /volume1/docker/pa-investing
 ```
 
-Keep the API bound to `127.0.0.1:8000` during the Notion-first MVP. Do not configure router port
-forwarding, a public reverse proxy, or Tailscale Funnel. Private browser/PWA access is a separate
-deployment slice. PostgreSQL must remain private to the Compose network: never publish host port
-`5432`.
+There are three Compose files, each for a different deployment shape:
+
+- `docker-compose.yml`: build from source on the host; default host bind is loopback.
+- `docker-compose.prebuilt.yml`: use a laptop-built image; default host bind is loopback for
+  Tailscale Serve or a private HTTPS reverse proxy.
+- `docker-compose.ugreen-lan.yml`: use a laptop-built image and publish the app directly on the
+  NAS LAN port for simple UGREEN Docker app deployment and local-network testing.
+
+For the current UGREEN app workflow, use `docker-compose.ugreen-lan.yml`. It publishes
+`<nas-ip>:${PA_NAS_HTTP_PORT:-8000}` and does not use `PA_BIND_ADDRESS`, which avoids the previous
+loopback-vs-LAN confusion. PostgreSQL remains private to the Compose network in all variants:
+never publish host port `5432`.
 
 ### Initial Installation
 
@@ -602,7 +610,7 @@ PA_ANALYTICS_AUTH_USERNAME
 PA_ANALYTICS_AUTH_PASSWORD
 PA_WORKFLOW_API_TOKEN
 PA_DEFAULT_BASE_CURRENCY
-PA_BIND_ADDRESS=127.0.0.1
+PA_NAS_HTTP_PORT=8000
 ```
 
 Use distinct URL-safe secrets for `PA_POSTGRES_PASSWORD`, analytics authentication, and
@@ -748,20 +756,40 @@ docker build --platform linux/amd64 -t "pa-investing-backend:${tag}" .
 docker save "pa-investing-backend:${tag}" -o "pa-investing-backend-${tag}.tar"
 ```
 
-Transfer `pa-investing-backend-${tag}.tar` to the NAS. In the UGREEN Docker app, import it from
-`Images` / `Local Images` using `Add Image` -> `Import from NAS`, then create or update the
-Compose project with `docker-compose.prebuilt.yml`. If a terminal is available on the NAS, the
-equivalent commands are:
+Transfer `pa-investing-backend-${tag}.tar` and `docker-compose.ugreen-lan.yml` to the NAS. In the
+UGREEN Docker app:
+
+1. Open `Images` / `Local Images`.
+2. Use `Add Image` -> `Import from NAS`.
+3. Select `pa-investing-backend-${tag}.tar`.
+4. Create or update the Compose project from `docker-compose.ugreen-lan.yml`.
+5. Set `PA_BACKEND_IMAGE=pa-investing-backend:${tag}`.
+6. Set the required `PA_*` environment values listed above.
+7. Start the project.
+8. Test `http://<nas-ip>:${PA_NAS_HTTP_PORT:-8000}/health`.
+9. Open `http://<nas-ip>:${PA_NAS_HTTP_PORT:-8000}/analysis/portfolio`.
+
+The UGREEN LAN compose file intentionally maps the API as:
+
+```yaml
+ports:
+  - "${PA_NAS_HTTP_PORT:-8000}:8000"
+```
+
+Do not add `PA_BIND_ADDRESS` to this LAN compose path. The container still runs Uvicorn on
+`0.0.0.0:8000`, and Docker publishes that container port to the NAS LAN port.
+
+If a terminal is available on the NAS, the equivalent commands are:
 
 ```bash
 docker load -i /path/to/pa-investing-backend-<tag>.tar
 cd /volume1/docker/pa-investing/backend
 export PA_BACKEND_IMAGE="pa-investing-backend:<tag>"
-docker compose -f docker-compose.prebuilt.yml config --quiet
-docker compose -f docker-compose.prebuilt.yml run --rm backend-api alembic upgrade head
-docker compose -f docker-compose.prebuilt.yml up -d
-docker compose -f docker-compose.prebuilt.yml ps
-curl --fail http://127.0.0.1:8000/health
+docker compose -f docker-compose.ugreen-lan.yml config --quiet
+docker compose -f docker-compose.ugreen-lan.yml run --rm backend-api alembic upgrade head
+docker compose -f docker-compose.ugreen-lan.yml up -d
+docker compose -f docker-compose.ugreen-lan.yml ps
+curl --fail http://<nas-ip>:${PA_NAS_HTTP_PORT:-8000}/health
 ```
 
 When using the UGREEN Docker app instead of the terminal, set the image/tag and environment values
@@ -769,7 +797,7 @@ through the project editor. Keep these values aligned with the image you loaded:
 
 - image: `pa-investing-backend:<tag>`
 - API command: `uvicorn pa_investing.main:app --host 0.0.0.0 --port 8000`
-- NAS port: the host port you want to access, mapped to container port `8000`
+- NAS port: `${PA_NAS_HTTP_PORT:-8000}`, mapped to container port `8000`
 - storage: persistent PostgreSQL volume plus any configured Compose volumes
 - environment: all required `PA_*` values from the `Initial Installation` section
 
