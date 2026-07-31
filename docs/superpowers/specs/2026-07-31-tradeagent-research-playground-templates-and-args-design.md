@@ -30,13 +30,26 @@ TradeAgent first (typed args), then PAMASTER (controls + templates).
 Pydantic models for each skill's valid parameter set:
 
 ```python
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 class TechnicalSkillParameters(BaseModel):
     window: int = Field(default=20, ge=2, le=252)
 
 class WorthBuyStocksParameters(BaseModel):
+    # Accepts comma-separated string (UI-friendly); validated into a tuple for the dataclass field.
     benchmark_symbols: str = Field(default="SPY,QQQ", min_length=1)
+
+    @field_validator("benchmark_symbols")
+    @classmethod
+    def _parse_to_tuple(cls, v: str) -> str:
+        # Normalise and validate, but keep as str — configure_skill() splits into tuple.
+        symbols = [s.strip().upper() for s in v.split(",") if s.strip()]
+        if not symbols:
+            raise ValueError("benchmark_symbols must contain at least one symbol")
+        return ",".join(symbols)
+
+    def as_tuple(self) -> tuple[str, ...]:
+        return tuple(self.benchmark_symbols.split(","))
 
 class MarkovMethodParameters(BaseModel):
     window: int = Field(default=20, ge=2, le=252)
@@ -83,7 +96,7 @@ def configure_skill(skill: ResearchSkill, params: dict[str, object]) -> Research
 
     if skill.name == "worth-buy-stocks":
         validated = WorthBuyStocksParameters.model_validate(params)
-        return replace(skill, benchmark_symbols=validated.benchmark_symbols)
+        return replace(skill, benchmark_symbols=validated.as_tuple())
 
     if skill.name == "markov-method":
         validated = MarkovMethodParameters.model_validate(params)
@@ -106,8 +119,16 @@ def configure_skill(skill: ResearchSkill, params: dict[str, object]) -> Research
 |---|---|
 | `domain/models.py` | Add `skill_parameters: dict[str, dict[str, JsonValue]] = Field(default_factory=dict)` to `AnalysisRequest` |
 | `application.py:describe_skill()` | Include `parameters` key from `SKILL_PARAMETER_SCHEMAS` in the returned dict (or `None` for skills without params) |
-| `application.py:run_skill()` | Look up base skill, call `configure_skill()`, then execute the configured copy |
+| `application.py:run_skill()` | Look up base skill, call `configure_skill()`, then execute the configured copy **directly through a new engine helper** (see Implementation Note below) |
+| `engine.py` | **New** `run_configured_skill(skill, request)` method — runs a single pre-configured skill without rediscovering from the frozen registry. Or alternatively, modify `run_skill()` in `application.py` to bypass `self.research()` and directly instantiate/run the configured skill |
 | `skills/__init__.py` | Export parameter models and schemas |
+
+**Implementation Note — Engine bypass:** The current `ResearchApplication.run_skill()` delegates to `self.research(selected)`, which calls `engine.analyze()`, which rediscovers skills from the frozen registry. A naive call to `self.research()` would discard the configured copy and run the default skill. The implementation must either:
+
+- (Recommended) Add a `run_configured_skill(skill: ResearchSkill, request: AnalysisRequest)` method to `ResearchEngine` that validates providers for the skill's capabilities, then runs `skill.analyze(instrument, providers)` directly — bypassing the registry lookup.
+- (Alternative) Construct a temporary one-skill `SkillRegistry` containing only the configured copy, and add an `analyze_with_skills(request, skills)` overload to the engine.
+
+Either approach keeps `ResearchSkill.analyze(instrument, providers)` stable.
 
 ### 1.5 TradeAgent tests
 
@@ -389,7 +410,9 @@ Add to the research page `<head>`:
 |---|---|
 | `src/trade_research/skills/parameters.py` | **New** — Pydantic parameter models + schema lookup |
 | `src/trade_research/domain/models.py` | Edit — add `skill_parameters` to `AnalysisRequest` |
-| `src/trade_research/application.py` | Edit — `describe_skill()` includes params; `configure_skill()` helper; `run_skill()` uses configured copy |
+| `src/trade_research/application.py` | Edit — `describe_skill()` includes params; `configure_skill()` helper; `run_skill()` uses configured copy via engine bypass |
+| `src/trade_research/engine.py` | Edit — new `run_configured_skill()` method (see Implementation Note above) |
+| `src/trade_research/http.py` | Edit — catch `ValueError` from `configure_skill()` (and `ValidationError` from Pydantic) in the `/skills/{name}/run` route, mapping both to HTTP 422 with a sanitized detail message. Currently the route only catches `ProviderConfigurationError` (503) and `KeyError` (404). |
 | `src/trade_research/skills/__init__.py` | Edit — export parameter models |
 | `tests/` (various) | **New** + Edit — parameter validation tests |
 
