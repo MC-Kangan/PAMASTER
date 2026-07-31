@@ -10,6 +10,7 @@ from pa_investing.db.base import Base
 from pa_investing.db.models import (
     BrokerReconciliationRecord,
     InstrumentRecord,
+    MarketDataMappingRecord,
     PositionRecord,
     PriceRecord,
     ProviderRunRecord,
@@ -18,6 +19,7 @@ from pa_investing.db.models import (
 from pa_investing.db.repositories import (
     AccountRepository,
     BrokerReconciliationRepository,
+    MarketDataMappingRepository,
     PositionRepository,
     PriceRepository,
     ProviderRunRepository,
@@ -167,6 +169,7 @@ def test_broker_import_workflow_overwrites_matching_account_positions() -> None:
             account_repository=account_repository,
             position_repository=position_repository,
             price_repository=PriceRepository(session),
+            market_data_mapping_repository=MarketDataMappingRepository(session),
             commit=session.commit,
             clock=lambda: datetime(2026, 7, 15, 7, tzinfo=UTC),
         )
@@ -183,12 +186,14 @@ def test_broker_import_workflow_overwrites_matching_account_positions() -> None:
             .order_by(PositionRecord.account_id, InstrumentRecord.symbol)
         ).all()
         stored_prices = session.scalars(select(PriceRecord)).all()
+        stored_mappings = session.scalars(select(MarketDataMappingRecord)).all()
 
     assert result.accounts_imported == 1
     assert result.positions_imported == 2
     assert result.positions_closed == 1
     assert result.cost_basis_available == 1
     assert result.cost_basis_missing == 1
+    assert result.market_data_mappings_imported == 1
     assert result.missing_cost_basis_positions == [
         {
             "account_id": "U1234567",
@@ -213,6 +218,15 @@ def test_broker_import_workflow_overwrites_matching_account_positions() -> None:
     assert position_by_key[("manual-pa", "AAPL")].quantity == Decimal("2")
     assert len(stored_prices) == 2
     assert {row.quality for row in stored_prices} == {QuoteQuality.DELAYED.value}
+    assert [
+        (
+            row.provider,
+            row.provider_symbol,
+            row.expected_currency,
+            row.price_multiplier,
+        )
+        for row in stored_mappings
+    ] == [("yahoo", "SPGI", "USD", Decimal("1"))]
 
 
 def test_broker_import_workflow_fails_when_no_supported_accounts_or_positions_are_returned(

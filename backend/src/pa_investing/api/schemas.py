@@ -26,6 +26,7 @@ class IbkrPositionImportResponse(BaseModel):
     transactions_imported: int
     reconciliations_imported: int
     reconciliation_warnings: int
+    market_data_mappings_imported: int
     cost_basis_available: int
     cost_basis_missing: int
 

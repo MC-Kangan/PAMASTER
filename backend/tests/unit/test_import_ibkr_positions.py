@@ -79,6 +79,7 @@ def test_run_ibkr_import_uses_flex_connector_when_flex_credentials_are_configure
             transaction_repository,
             reconciliation_repository,
             provider_run_repository,
+            market_data_mapping_repository,
             commit,
             rollback,
         ):

@@ -428,8 +428,9 @@ The browser has two separate IBKR refresh buttons because IBKR Flex can rate-lim
 queries from a single token:
 
 - `Refresh Positions` imports positions, closed positions, and trade executions from
-  `PA_IBKR_FLEX_QUERY_ID`, then refreshes market prices, the dashboard snapshot, signals, and
-  optional Notion sync.
+  `PA_IBKR_FLEX_QUERY_ID`, seeds conservative Yahoo chart mappings for obvious US/USD listed
+  stocks and ETFs, then refreshes market prices, the dashboard snapshot, signals, and optional
+  Notion sync.
 - `Refresh History` imports YTD broker NAV and broker daily P&L from
   `PA_IBKR_FLEX_HISTORY_QUERY_ID`. This is the refresh that advances the broker P&L Calendar and
   Latest Broker P&L Contributors.
@@ -478,8 +479,10 @@ execution markers, broker average cost, optional SMA20 and volume, and a trade-p
 reconciliation banner. Configure `PA_IBKR_FLEX_TIMEZONE` to match the timezone selected in the
 Flex query (for example, `Europe/London`) so executions align with candles. The default
 `PA_MARKET_DATA_RECONCILIATION_TOLERANCE=0.01` permits a one-percent near-match before showing a
-warning. Provider price multipliers remain the explicit control for GBP/GBp and similar unit
-normalization.
+warning. US/USD stocks and ETFs with plain Yahoo symbols are auto-seeded during
+`Refresh Positions`. Provider price multipliers remain the explicit control for GBP/GBp and
+similar unit normalization, so non-US listings still require explicit `market_data_mappings` rows
+instead of silent suffix or 100× unit guesses.
 
 The Notion free plan permits only one native chart for the workspace and the available chart slot
 is already consumed. Notion remains the compact operating dashboard; richer and interactive charts

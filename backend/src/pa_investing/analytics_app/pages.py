@@ -749,6 +749,7 @@ def portfolio_page() -> str:
                 status.textContent = [
                   `Positions refreshed: ${positions} positions`,
                   `${refreshPayload.position_import.transactions_imported} trades`,
+                  `${refreshPayload.position_import.market_data_mappings_imported} chart mappings`,
                   'Dashboard refreshed.',
                 ].join(', ');
               } catch (error) {

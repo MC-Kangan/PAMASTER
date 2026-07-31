@@ -7,6 +7,7 @@ from pa_investing.brokers.interfaces import BrokerConnector
 from pa_investing.db.repositories import (
     AccountRepository,
     BrokerReconciliationRepository,
+    MarketDataMappingRepository,
     PositionRepository,
     PriceRepository,
     ProviderRunRepository,
@@ -18,6 +19,7 @@ from pa_investing.domain.enums import (
     QuoteQuality,
 )
 from pa_investing.domain.models import Account, PricePoint, ProviderRun
+from pa_investing.instruments.default_mappings import seed_default_yahoo_mappings
 
 
 @dataclass(frozen=True)
@@ -32,6 +34,7 @@ class BrokerImportResult:
     transactions_imported: int = 0
     reconciliations_imported: int = 0
     reconciliation_warnings: int = 0
+    market_data_mappings_imported: int = 0
 
 
 class BrokerImportWorkflow:
@@ -45,6 +48,7 @@ class BrokerImportWorkflow:
         transaction_repository: TransactionRepository | None = None,
         reconciliation_repository: BrokerReconciliationRepository | None = None,
         provider_run_repository: ProviderRunRepository | None = None,
+        market_data_mapping_repository: MarketDataMappingRepository | None = None,
         rollback: Callable[[], None] | None = None,
         clock: Callable[[], datetime] | None = None,
     ) -> None:
@@ -56,6 +60,7 @@ class BrokerImportWorkflow:
         self.transaction_repository = transaction_repository
         self.reconciliation_repository = reconciliation_repository
         self.provider_run_repository = provider_run_repository
+        self.market_data_mapping_repository = market_data_mapping_repository
         self.rollback = rollback
         self.clock = clock or (lambda: datetime.now(tz=UTC))
 
@@ -169,6 +174,14 @@ class BrokerImportWorkflow:
         if self.reconciliation_repository is not None:
             for reconciliation in reconciliations:
                 self.reconciliation_repository.upsert(reconciliation)
+        market_data_mappings_imported = (
+            seed_default_yahoo_mappings(
+                effective_positions,
+                self.market_data_mapping_repository,
+            )
+            if self.market_data_mapping_repository is not None
+            else 0
+        )
 
         cost_basis_available = 0
         cost_basis_missing = 0
@@ -206,6 +219,7 @@ class BrokerImportWorkflow:
                             + len(positions)
                             + len(transactions)
                             + len(reconciliations)
+                            + market_data_mappings_imported
                         ),
                         "warning_count": (
                             len(getattr(self.connector, "last_skipped_positions", []))
@@ -228,6 +242,7 @@ class BrokerImportWorkflow:
             transactions_imported=len(transactions),
             reconciliations_imported=len(reconciliations),
             reconciliation_warnings=reconciliation_warnings,
+            market_data_mappings_imported=market_data_mappings_imported,
         )
 
 

@@ -731,6 +731,7 @@ def _position_import_response(result: BrokerImportResult) -> IbkrPositionImportR
         transactions_imported=result.transactions_imported,
         reconciliations_imported=result.reconciliations_imported,
         reconciliation_warnings=result.reconciliation_warnings,
+        market_data_mappings_imported=result.market_data_mappings_imported,
         cost_basis_available=result.cost_basis_available,
         cost_basis_missing=result.cost_basis_missing,
     )

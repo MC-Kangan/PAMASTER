@@ -7,6 +7,7 @@ from pa_investing.core.config import Settings
 from pa_investing.db.repositories import (
     AccountRepository,
     BrokerReconciliationRepository,
+    MarketDataMappingRepository,
     PositionRepository,
     PriceRepository,
     ProviderRunRepository,
@@ -38,6 +39,7 @@ def run_ibkr_import(
                 transaction_repository=TransactionRepository(session),
                 reconciliation_repository=BrokerReconciliationRepository(session),
                 provider_run_repository=ProviderRunRepository(session),
+                market_data_mapping_repository=MarketDataMappingRepository(session),
                 commit=session.commit,
                 rollback=getattr(session, "rollback", None),
             )
@@ -53,6 +55,7 @@ def run_ibkr_import(
             f"closed={result.positions_closed} "
             f"skipped={len(result.skipped_positions)} "
             f"transactions={result.transactions_imported} "
+            f"market_data_mappings={result.market_data_mappings_imported} "
             f"reconciliations={result.reconciliations_imported} "
             f"reconciliation_warnings={result.reconciliation_warnings}"
         )

@@ -262,10 +262,16 @@ Use the browser buttons instead of opening the Docker terminal for normal manual
 6. Confirm the P&L Calendar and Latest Broker P&L Contributors show the latest broker report date
    available from IBKR.
 
-`Refresh Positions` imports current positions, closed positions, and trade executions, then
-refreshes the dashboard snapshot. `Refresh History` imports YTD broker NAV and daily MTM P&L.
-Those are intentionally separate because IBKR Flex rate-limits back-to-back requests from the same
-token.
+`Refresh Positions` imports current positions, closed positions, and trade executions, seeds
+conservative Yahoo chart mappings for obvious US/USD symbols such as `ADBE`, `AAPL`, and `MSFT`,
+then refreshes the dashboard snapshot. `Refresh History` imports YTD broker NAV and daily MTM
+P&L. Those are intentionally separate because IBKR Flex rate-limits back-to-back requests from the
+same token.
+
+If the Position Chart says `Yahoo mapping is missing for ADBE` after deploying a new image, click
+`Refresh Positions` once on the NAS app. That creates the safe US/USD chart mappings in the NAS
+database. UK/GBp or non-US mappings are not auto-created because their Yahoo suffixes and price
+units need explicit review.
 
 ## 10. Optional terminal diagnostics
 
