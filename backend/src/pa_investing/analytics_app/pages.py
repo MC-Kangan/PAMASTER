@@ -38,6 +38,11 @@ def portfolio_page() -> str:
       <head>
         <title>Portfolio Analysis</title>
         <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <meta name="apple-mobile-web-app-capable" content="yes" />
+        <meta name="apple-mobile-web-app-title" content="PA Investing" />
+        <meta name="theme-color" content="#f5f7fb" />
+        <link rel="manifest" href="/analysis/manifest.webmanifest" />
+        <link rel="apple-touch-icon" href="/analysis/app-icon.svg" />
         <style>
           :root {
             color-scheme: light;
@@ -412,6 +417,7 @@ def portfolio_page() -> str:
                   <a class="tab" id="portfolio-tab" href="/analysis/portfolio"
                      aria-current="page">Portfolio</a>
                   <a class="tab" href="/analysis/position-chart">Position Chart</a>
+                  <a class="tab" href="/analysis/research">Research</a>
                 </div>
                 <div class="refresh-controls">
                   <span class="refresh-status" id="refresh-status"
@@ -1044,6 +1050,11 @@ def position_chart_page() -> str:
       <head>
         <title>Position Chart</title>
         <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <meta name="apple-mobile-web-app-capable" content="yes" />
+        <meta name="apple-mobile-web-app-title" content="PA Investing" />
+        <meta name="theme-color" content="#f5f7fb" />
+        <link rel="manifest" href="/analysis/manifest.webmanifest" />
+        <link rel="apple-touch-icon" href="/analysis/app-icon.svg" />
         <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
         <style>
           :root {
@@ -1249,6 +1260,7 @@ def position_chart_page() -> str:
             <a class="tab" href="/analysis/portfolio">Portfolio</a>
             <a class="tab" href="/analysis/position-chart"
                aria-current="page">Position Chart</a>
+            <a class="tab" href="/analysis/research">Research</a>
           </nav>
           <section class="intro">
             <h1>Position Chart</h1>
@@ -1731,6 +1743,526 @@ def position_chart_page() -> str:
             empty.className = 'empty';
             empty.textContent = String(error.message || error);
             shell.append(empty);
+          });
+        </script>
+      </body>
+    </html>
+    """
+
+
+def research_page() -> str:
+    return """
+    <html>
+      <head>
+        <title>Research Playground</title>
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <meta name="apple-mobile-web-app-capable" content="yes" />
+        <meta name="apple-mobile-web-app-title" content="PA Investing" />
+        <meta name="theme-color" content="#f5f7fb" />
+        <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
+        <link rel="manifest" href="/analysis/manifest.webmanifest" />
+        <link rel="apple-touch-icon" href="/analysis/app-icon.svg" />
+        <style>
+          :root {
+            color-scheme: light;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+          }
+          * { box-sizing: border-box; }
+          body {
+            margin: 0;
+            background: #f5f7fb;
+            color: #111827;
+          }
+          main {
+            max-width: 1180px;
+            margin: 0 auto;
+            padding: 16px 12px 48px;
+          }
+          h1, h2, p { margin: 0; }
+          .top-nav {
+            display: flex;
+            gap: 18px;
+            margin-bottom: 24px;
+            border-bottom: 1px solid #dbe4f0;
+            overflow-x: auto;
+          }
+          .tab {
+            color: #64748b;
+            border-bottom: 3px solid transparent;
+            padding: 10px 4px 9px;
+            font-weight: 650;
+            text-decoration: none;
+            white-space: nowrap;
+          }
+          .tab[aria-current="page"] {
+            color: #1d4ed8;
+            border-bottom-color: #2563eb;
+          }
+          .intro {
+            display: grid;
+            gap: 7px;
+            margin-bottom: 16px;
+          }
+          .subtitle { color: #64748b; font-size: 14px; }
+          .layout {
+            display: grid;
+            gap: 14px;
+          }
+          .panel {
+            background: #ffffff;
+            border: 1px solid #dbe4f0;
+            border-radius: 8px;
+            padding: 14px;
+            min-width: 0;
+          }
+          .controls {
+            display: grid;
+            gap: 12px;
+          }
+          label {
+            display: grid;
+            gap: 6px;
+            color: #475569;
+            font-size: 12px;
+            font-weight: 650;
+          }
+          select,
+          input {
+            min-height: 40px;
+            width: 100%;
+            border: 1px solid #cbd5e1;
+            border-radius: 7px;
+            background: #ffffff;
+            color: #111827;
+            font: inherit;
+            padding: 8px 10px;
+          }
+          .field-row {
+            display: grid;
+            gap: 10px;
+          }
+          .skills {
+            display: grid;
+            gap: 8px;
+          }
+          .skill-option {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            color: #334155;
+            font-size: 14px;
+            font-weight: 550;
+          }
+          .skill-option input {
+            width: 18px;
+            min-height: 18px;
+          }
+          button {
+            min-height: 42px;
+            border: 1px solid #1d4ed8;
+            border-radius: 7px;
+            background: #2563eb;
+            color: #ffffff;
+            cursor: pointer;
+            font: inherit;
+            font-weight: 650;
+            padding: 8px 14px;
+          }
+          button:disabled {
+            cursor: wait;
+            opacity: .65;
+          }
+          .context-grid {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 8px;
+          }
+          .metric {
+            border: 1px solid #dbe4f0;
+            border-radius: 8px;
+            padding: 10px;
+            min-width: 0;
+          }
+          .metric-label {
+            color: #64748b;
+            font-size: 12px;
+            margin-bottom: 4px;
+          }
+          .metric-value {
+            font-size: 17px;
+            font-weight: 680;
+            font-variant-numeric: tabular-nums;
+            overflow-wrap: anywhere;
+          }
+          .status {
+            border-radius: 8px;
+            background: #f8fafc;
+            color: #475569;
+            padding: 10px 12px;
+            font-size: 13px;
+          }
+          .status.warning {
+            background: #fffbeb;
+            color: #92400e;
+            border: 1px solid #fcd34d;
+          }
+          .results {
+            display: grid;
+            gap: 12px;
+          }
+          .result {
+            border: 1px solid #dbe4f0;
+            border-radius: 8px;
+            padding: 12px;
+          }
+          .result h2 {
+            font-size: 18px;
+            margin-bottom: 8px;
+          }
+          .badge {
+            display: inline-flex;
+            border-radius: 999px;
+            background: #e0e7ff;
+            color: #3730a3;
+            font-size: 12px;
+            font-weight: 650;
+            padding: 5px 9px;
+            margin-bottom: 8px;
+          }
+          table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 13px;
+          }
+          th,
+          td {
+            border-bottom: 1px solid #e2e8f0;
+            padding: 7px 6px;
+            text-align: left;
+            vertical-align: top;
+          }
+          td { overflow-wrap: anywhere; }
+          pre {
+            max-height: 360px;
+            overflow: auto;
+            background: #0f172a;
+            color: #e2e8f0;
+            border-radius: 8px;
+            padding: 12px;
+            font-size: 12px;
+          }
+          .skill-entry {
+            display: grid;
+            gap: 4px;
+          }
+          .skill-params {
+            display: grid;
+            gap: 6px;
+            padding: 6px 0 6px 26px;
+          }
+          .skill-params label {
+            display: grid;
+            gap: 3px;
+            font-size: 12px;
+          }
+          .skill-params input[type="number"],
+          .skill-params input[type="text"] {
+            min-height: 32px;
+            padding: 4px 8px;
+          }
+          @media (min-width: 820px) {
+            main { padding: 24px 16px 48px; }
+            .layout { grid-template-columns: 360px minmax(0, 1fr); align-items: start; }
+            .field-row { grid-template-columns: 1fr 120px; }
+            .context-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+          }
+        </style>
+      </head>
+      <body>
+        <main>
+          <nav class="top-nav" aria-label="Portfolio sections">
+            <a class="tab" href="/analysis/portfolio">Portfolio</a>
+            <a class="tab" href="/analysis/position-chart">Position Chart</a>
+            <a class="tab" href="/analysis/research" aria-current="page">Research</a>
+          </nav>
+          <section class="intro">
+            <h1>Research Playground</h1>
+            <p class="subtitle">
+              Select a position or research any symbol, choose skills, and run analysis when needed.
+            </p>
+          </section>
+          <div class="layout">
+            <section class="panel controls" aria-label="Research controls">
+              <label>
+                Research target
+                <select id="position-select">
+                  <option value="">Manual research / no current position</option>
+                </select>
+              </label>
+              <div class="field-row">
+                <label>
+                  Symbol
+                  <input id="symbol-input" autocomplete="off" />
+                </label>
+                <label>
+                  Market
+                  <input id="market-input" autocomplete="off" />
+                </label>
+              </div>
+              <div>
+                <label>Skills</label>
+                <div class="skills" id="skills"></div>
+              </div>
+              <button id="run-button" type="button">Run Research</button>
+              <div class="status" id="status">Loading TradeAgent skills...</div>
+            </section>
+            <section class="panel">
+              <div class="context-grid" id="position-context"></div>
+              <div class="results" id="results">
+                <div class="status">Choose a position and run selected skills.</div>
+              </div>
+            </section>
+          </div>
+        </main>
+        <script>
+          const state = {
+            positions: [],
+            selected: null,
+            skills: [],
+          };
+
+          function byId(id) { return document.getElementById(id); }
+
+          function number2(value) {
+            if (value === null || value === undefined || value === '') return '--';
+            const parsed = Number(value);
+            if (!Number.isFinite(parsed)) return value;
+            return parsed.toLocaleString(undefined, {
+              minimumFractionDigits: 2,
+              maximumFractionDigits: 2,
+            });
+          }
+
+          function setStatus(message, warning = false) {
+            const status = byId('status');
+            status.textContent = message;
+            status.classList.toggle('warning', warning);
+          }
+
+          function metric(label, value) {
+            return `<article class="metric"><div class="metric-label">${label}</div>` +
+              `<div class="metric-value">${value || '--'}</div></article>`;
+          }
+
+          function renderPositionContext(position) {
+            byId('position-context').innerHTML = position ? [
+              metric('Target type', 'Current position'),
+              metric('Quantity', position.quantity),
+              metric('Average cost', number2(position.average_cost)),
+              metric('Latest price', number2(position.latest_price)),
+              metric('Unrealized P&L', number2(position.unrealized_pnl)),
+              metric('Venue', position.venue),
+              metric('TradeAgent market', position.trade_agent_market),
+            ].join('') : [
+              metric('Target type', 'Manual research'),
+              metric('Position', 'Not currently held'),
+              metric('Portfolio context', 'None'),
+            ].join('');
+          }
+
+          function selectedSkills() {
+            return [...document.querySelectorAll('[data-skill]:checked')]
+              .map(item => item.dataset.skill);
+          }
+
+          function selectPosition() {
+            const value = byId('position-select').value;
+            state.selected = state.positions.find(item =>
+              `${item.account_id}::${item.instrument_id || ''}` === value
+            ) || null;
+            if (state.selected) {
+              byId('symbol-input').value = state.selected.symbol;
+              byId('market-input').value = state.selected.trade_agent_market || '';
+            }
+            renderPositionContext(state.selected);
+          }
+
+          async function loadPositions() {
+            const response = await fetch('/analysis/research/positions');
+            if (!response.ok) throw new Error(`Position request failed (${response.status})`);
+            state.positions = await response.json();
+            const select = byId('position-select');
+            select.innerHTML = '<option value="">Manual research / no current position</option>';
+            if (!state.positions.length) {
+              renderPositionContext(null);
+              return;
+            }
+            const group = document.createElement('optgroup');
+            group.label = 'Current positions';
+            for (const position of state.positions) {
+              const option = document.createElement('option');
+              option.value = `${position.account_id}::${position.instrument_id || ''}`;
+              option.textContent = `${position.symbol} · ${position.quantity} · ` +
+                `${position.currency} · held`;
+              group.append(option);
+            }
+            select.append(group);
+            select.value = group.firstElementChild ? group.firstElementChild.value : '';
+            selectPosition();
+          }
+
+          async function loadSkills() {
+            const response = await fetch('/analysis/research/skills');
+            if (!response.ok) throw new Error(`Skills request failed (${response.status})`);
+            const payload = await response.json();
+            state.skills = payload.skills || [];
+            const container = byId('skills');
+            container.innerHTML = '';
+            if (!payload.configured || payload.status !== 'available') {
+              setStatus(payload.detail || 'TradeAgent is unavailable.', true);
+              return;
+            }
+            for (const skill of state.skills) {
+              const wrapper = document.createElement('div');
+              wrapper.className = 'skill-entry';
+              const label = document.createElement('label');
+              label.className = 'skill-option';
+              label.innerHTML = `<input type="checkbox" data-skill="${skill.name}" />` +
+                `<span>${skill.name}</span>`;
+              wrapper.append(label);
+
+              if (skill.parameters && skill.parameters.properties) {
+                const controls = document.createElement('div');
+                controls.className = 'skill-params';
+                controls.id = `params-${skill.name}`;
+                controls.style.display = 'none';
+                for (const [name, prop] of Object.entries(skill.parameters.properties)) {
+                  const paramLabel = document.createElement('label');
+                  paramLabel.style.fontWeight = '500';
+                  paramLabel.style.fontSize = '12px';
+                  paramLabel.textContent = name;
+                  let input;
+                  if (prop.type === 'boolean') {
+                    input = document.createElement('input');
+                    input.type = 'checkbox';
+                    if (prop.default === true) input.checked = true;
+                    input.dataset.param = name;
+                    input.dataset.skill = skill.name;
+                    paramLabel.style.display = 'flex';
+                    paramLabel.style.alignItems = 'center';
+                    paramLabel.style.gap = '6px';
+                    paramLabel.prepend(input);
+                  } else {
+                    input = document.createElement('input');
+                    input.type = prop.type === 'integer' || prop.type === 'number' ? 'number' : 'text';
+                    if (prop.type === 'integer') input.step = '1';
+                    if (prop.type === 'number' && !prop.step) input.step = '0.01';
+                    if (prop.minimum !== undefined) input.min = prop.minimum;
+                    if (prop.maximum !== undefined) input.max = prop.maximum;
+                    if (prop.default !== undefined) input.value = prop.default;
+                    input.dataset.param = name;
+                    input.dataset.skill = skill.name;
+                    paramLabel.append(input);
+                  }
+                  controls.append(paramLabel);
+                }
+                wrapper.append(controls);
+                const checkbox = label.querySelector('input[type=checkbox]');
+                checkbox.addEventListener('change', function () {
+                  controls.style.display = this.checked ? 'grid' : 'none';
+                });
+              }
+              container.append(wrapper);
+            }
+            const first = container.querySelector('input[type=checkbox]');
+            if (first) first.checked = true;
+            setStatus('Ready.');
+          }
+
+          function renderReport(result) {
+            if (result.status === 'failed') {
+              return `<article class="result"><h2>${result.skill}</h2>` +
+                `<div class="status warning">${result.detail || 'Skill failed.'}</div></article>`;
+            }
+            const report = result.report || {};
+            const rows = [];
+            for (const section of report.results || []) {
+              for (const observation of section.observations || []) {
+                rows.push(`<tr><td>${section.analyst}</td><td>${observation.metric}</td>` +
+                  `<td>${JSON.stringify(observation.value)}</td><td>${observation.source}</td></tr>`);
+              }
+            }
+            return `<article class="result"><h2>${result.skill}</h2>` +
+              `<span class="badge">complete</span>` +
+              (rows.length ? `<table><thead><tr><th>Skill</th><th>Metric</th><th>Value</th>` +
+                `<th>Source</th></tr></thead><tbody>${rows.join('')}</tbody></table>` :
+                '<div class="status">No numeric observations returned.</div>') +
+              `<details><summary>Raw JSON</summary><pre>` +
+              `${JSON.stringify(report, null, 2)}</pre></details>` +
+              `</article>`;
+          }
+
+          async function runResearch() {
+            const skills = selectedSkills();
+            const symbol = byId('symbol-input').value.trim();
+            const market = byId('market-input').value.trim();
+            if (!symbol || !market || !skills.length) {
+              setStatus('Choose a symbol, market, and at least one skill.', true);
+              return;
+            }
+            const skillParameters = {};
+            for (const skill of skills) {
+              const params = {};
+              const controls = document.querySelectorAll(`[data-skill="${skill}"][data-param]`);
+              for (const input of controls) {
+                const name = input.dataset.param;
+                if (input.type === 'checkbox') {
+                  params[name] = input.checked;
+                } else if (input.type === 'number') {
+                  params[name] = input.value.includes('.') ? parseFloat(input.value) : parseInt(input.value, 10);
+                } else {
+                  params[name] = input.value;
+                }
+              }
+              if (Object.keys(params).length) skillParameters[skill] = params;
+            }
+            const button = byId('run-button');
+            button.disabled = true;
+            setStatus('Running selected skills...');
+            byId('results').innerHTML = '<div class="status">Running...</div>';
+            try {
+              const response = await fetch('/analysis/research/run', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({
+                  account_id: state.selected ? state.selected.account_id : null,
+                  instrument_id: state.selected ? state.selected.instrument_id : null,
+                  symbol,
+                  market,
+                  skills,
+                  skill_parameters: skillParameters,
+                }),
+              });
+              const payload = await response.json();
+              if (!response.ok) {
+                throw new Error(payload.detail || `Run failed (${response.status})`);
+              }
+              byId('results').innerHTML = payload.results.map(renderReport).join('');
+              setStatus('Research complete.');
+            } catch (error) {
+              byId('results').innerHTML = `<div class="status warning">${error.message}</div>`;
+              setStatus(error.message || 'Research failed.', true);
+            } finally {
+              button.disabled = false;
+            }
+          }
+
+          byId('position-select').addEventListener('change', selectPosition);
+          byId('run-button').addEventListener('click', runResearch);
+          Promise.allSettled([loadPositions(), loadSkills()]).then(results => {
+            for (const result of results) {
+              if (result.status === 'rejected') setStatus(result.reason.message, true);
+            }
           });
         </script>
       </body>
