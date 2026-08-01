@@ -2340,8 +2340,82 @@ def research_page() -> str:
               `</div>`;
           }
 
+          function renderTechnicalReport(report, section) {
+            const missing = section.missing_metrics || [];
+            const limitations = section.limitations || [];
+            const priceReturn = findObs(report, 'price_return');
+            const sma = findObs(report, 'simple_moving_average_20') || findObs(report, 'simple_moving_average');
+            const ema = findObs(report, 'exponential_moving_average_20');
+            const rsi = findObs(report, 'relative_strength_index_14');
+            const macd = findObs(report, 'macd_12_26');
+            const macdSig = findObs(report, 'macd_signal_9');
+            const macdHist = findObs(report, 'macd_histogram');
+            const atr = findObs(report, 'average_true_range_14');
+            const vol = findObs(report, 'annualized_volatility_20');
+            const volTrend = findObs(report, 'volume_trend_20');
+            const momentum = findObs(report, 'momentum_10');
+            const bbMid = findObs(report, 'bollinger_middle_20');
+            const bbUpper = findObs(report, 'bollinger_upper_20_2');
+            const bbLower = findObs(report, 'bollinger_lower_20_2');
+
+            let summary = `${section.signal || 'Not assessed'} signal with ${section.status || 'unknown'} status.`;
+            if (section.status === 'partial') summary += ' Some indicators could not be computed due to insufficient data.';
+            if (section.summary) summary = section.summary;
+
+            function trendText() {
+              const parts = [];
+              if (sma != null) parts.push(`SMA(20) is ${Number(sma).toFixed(2)}`);
+              if (priceReturn != null) parts.push(`price return is ${(Number(priceReturn) * 100).toFixed(2)}%`);
+              if (!parts.length) return 'Insufficient data for trend assessment.';
+              return parts.join('; ') + '.';
+            }
+
+            function momentumText() {
+              const parts = [];
+              if (rsi != null) {
+                const r = Number(rsi);
+                parts.push(`RSI(14) is ${r.toFixed(1)} (${r > 70 ? 'overbought' : r < 30 ? 'oversold' : 'neutral'})`);
+              }
+              if (macdHist != null) {
+                const mh = Number(macdHist);
+                parts.push(`MACD histogram is ${mh > 0 ? 'positive' : 'negative'} at ${mh.toFixed(4)}`);
+              }
+              if (!parts.length) return 'Insufficient data for momentum assessment.';
+              return parts.join('; ') + '.';
+            }
+
+            function riskText() {
+              const parts = [];
+              if (atr != null) parts.push(`ATR(14) is ${Number(atr).toFixed(2)}`);
+              if (vol != null) parts.push(`annualized volatility is ${(Number(vol) * 100).toFixed(1)}%`);
+              if (bbMid != null && bbUpper != null && bbLower != null) {
+                parts.push(`Bollinger Bands: lower ${Number(bbLower).toFixed(2)}, middle ${Number(bbMid).toFixed(2)}, upper ${Number(bbUpper).toFixed(2)}`);
+              }
+              if (!parts.length) return 'Insufficient data for risk range assessment.';
+              return parts.join('; ') + '.';
+            }
+
+            function volumeText() {
+              const parts = [];
+              if (volTrend != null) {
+                const v = Number(volTrend);
+                parts.push(`volume trend is ${v > 0 ? 'expanding' : 'contracting'} (${(v * 100).toFixed(1)}%)`);
+              }
+              if (missing.length) parts.push(`missing metrics: ${missing.join(', ')}`);
+              if (limitations.length) parts.push(`limitations: ${limitations.join(', ')}`);
+              if (!parts.length) return 'No volume data or data quality issues reported.';
+              return parts.join('; ') + '.';
+            }
+
+            return `<div class="section"><h3>Summary</h3><p>${summary}</p></div>` +
+              `<div class="section"><h3>Trend</h3><p>${trendText()}</p></div>` +
+              `<div class="section"><h3>Momentum</h3><p>${momentumText()}</p></div>` +
+              `<div class="section"><h3>Risk Range</h3><p>${riskText()}</p></div>` +
+              `<div class="section"><h3>Volume & Data Quality</h3><p>${volumeText()}</p></div>`;
+          }
+
           const REPORT_TEMPLATES = {
-            "technical": null,       // filled in Task 13
+            "technical": renderTechnicalReport,
             "worth-buy-stocks": null, // filled in Task 14
             "markov-method": null,    // filled in Task 15
             "_fallback": renderGenericReport,
@@ -2394,6 +2468,73 @@ def research_page() -> str:
             };
             const plotFn = plotFns[analyst];
             if (plotFn) plotFn(section, vizEl);
+          }
+
+          function plotTechnicalCharts(section, vizEl) {
+            const metrics = [
+              {label: 'Return %', metric: 'price_return', format: v => (v * 100).toFixed(2)},
+              {label: 'RSI (0-100)', metric: 'relative_strength_index_14', format: v => v.toFixed(1)},
+              {label: 'MACD Hist', metric: 'macd_histogram', format: v => v.toFixed(4)},
+              {label: 'Volatility %', metric: 'annualized_volatility_20', format: v => (v * 100).toFixed(1)},
+              {label: 'Volume Trend %', metric: 'volume_trend_20', format: v => (v * 100).toFixed(1)},
+            ];
+
+            const labels = [];
+            const values = [];
+            const colors = [];
+
+            for (const m of metrics) {
+              const val = findObs({results: [section]}, m.metric);
+              if (val == null) continue;
+              labels.push(m.label);
+              values.push(Number(m.format(val)));
+              // Color logic: constructive=green, caution=red, neutral=gray
+              if (m.metric === 'relative_strength_index_14') {
+                colors.push(val > 70 ? '#ef4444' : val < 30 ? '#22c55e' : '#94a3b8');
+              } else if (m.metric === 'macd_histogram' || m.metric === 'price_return') {
+                colors.push(val > 0 ? '#22c55e' : '#ef4444');
+              } else if (m.metric === 'volume_trend_20') {
+                colors.push(val > 0 ? '#22c55e' : '#ef4444');
+              } else {
+                colors.push('#3b82f6');
+              }
+            }
+
+            if (!labels.length) return;
+
+            const trace = {
+              type: 'bar',
+              x: values,
+              y: labels,
+              orientation: 'h',
+              marker: {color: colors},
+              text: values.map(v => String(v)),
+              textposition: 'outside',
+            };
+
+            const layout = {
+              margin: {l: 100, r: 50, t: 10, b: 10},
+              height: Math.max(160, labels.length * 40),
+              xaxis: {showgrid: true, zeroline: true},
+              yaxis: {automargin: true},
+            };
+
+            vizEl.innerHTML = '<div class="chart-box" id="chart-technical"></div>';
+            Plotly.newPlot('chart-technical', [trace], layout, {
+              responsive: true,
+              displaylogo: false,
+              modeBarButtonsToRemove: ['select2d', 'lasso2d'],
+            });
+
+            // Mini-cards for SMA, ATR
+            const sma = findObs({results: [section]}, 'simple_moving_average_20') || findObs({results: [section]}, 'simple_moving_average');
+            const atr = findObs({results: [section]}, 'average_true_range_14');
+            const cardsHtml = [];
+            if (sma != null) cardsHtml.push(`<div class="ref-card"><div class="ref-label">SMA</div><div class="ref-value">${Number(sma).toFixed(2)}</div></div>`);
+            if (atr != null) cardsHtml.push(`<div class="ref-card"><div class="ref-label">ATR</div><div class="ref-value">${Number(atr).toFixed(2)}</div></div>`);
+            if (cardsHtml.length) {
+              vizEl.innerHTML += `<div class="ref-cards">${cardsHtml.join('')}</div>`;
+            }
           }
 
           function renderTabs(results) {
