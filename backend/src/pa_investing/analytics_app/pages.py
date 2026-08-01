@@ -2181,8 +2181,8 @@ def research_page() -> str:
           }
 
           function selectedSkills() {
-            return [...document.querySelectorAll('[data-skill]:checked')]
-              .map(item => item.dataset.skill);
+            return [...document.querySelectorAll('[data-skill-toggle]:checked')]
+              .map(item => item.dataset.skillToggle);
           }
 
           function selectPosition() {
@@ -2237,7 +2237,7 @@ def research_page() -> str:
               wrapper.className = 'skill-entry';
               const label = document.createElement('label');
               label.className = 'skill-option';
-              label.innerHTML = `<input type="checkbox" data-skill="${skill.name}" />` +
+              label.innerHTML = `<input type="checkbox" data-skill-toggle="${skill.name}" />` +
                 `<span>${skill.name}</span>`;
               wrapper.append(label);
 
@@ -2285,7 +2285,11 @@ def research_page() -> str:
               container.append(wrapper);
             }
             const first = container.querySelector('input[type=checkbox]');
-            if (first) first.checked = true;
+            if (first) {
+              first.checked = true;
+              const params = container.querySelector('.skill-params');
+              if (params) params.style.display = 'grid';
+            }
             setStatus('Ready.');
           }
 

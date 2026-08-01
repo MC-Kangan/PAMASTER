@@ -110,9 +110,14 @@ class TradeAgentClient:
                 "PA_TRADE_RESEARCH_BASE_URL points to TradeAgent, not PAMASTER"
             )
         if response.status_code >= 400:
-            raise TradeAgentClientError(
-                f"TradeAgent request failed with status {response.status_code}"
-            )
+            detail = f"TradeAgent request failed with status {response.status_code}"
+            try:
+                body = response.json()
+                if isinstance(body, dict) and body.get("detail"):
+                    detail = str(body["detail"])
+            except Exception:
+                pass
+            raise TradeAgentClientError(detail)
         return response
 
 
