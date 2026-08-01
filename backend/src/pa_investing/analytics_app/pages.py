@@ -2481,10 +2481,71 @@ def research_page() -> str:
                 (limitations.length ? `Limitations: ${limitations.join(', ')}.` : '') + `</p></div>` : '');
           }
 
+          function renderMarkovReport(report, section) {
+            const curRegime = findObs(report, 'markov_current_regime');
+            const signal = findObs(report, 'markov_signal');
+            const bullProb = findObs(report, 'markov_stationary_bull');
+            const bearProb = findObs(report, 'markov_stationary_bear');
+            const sidewaysProb = findObs(report, 'markov_stationary_sideways');
+            const persBull = findObs(report, 'markov_persistence_bull');
+            const persBear = findObs(report, 'markov_persistence_bear');
+            const persSideways = findObs(report, 'markov_persistence_sideways');
+            const wfAccuracy = findObs(report, 'markov_walkforward_accuracy');
+            const missing = section.missing_metrics || [];
+
+            function regimeText() {
+              if (curRegime == null) return 'Current regime could not be determined.';
+              const code = Math.round(Number(curRegime));
+              const label = REGIME_LABELS[code] || `Unknown (${code})`;
+              return `The current regime is <strong>${label}</strong>.`;
+            }
+
+            function signalText() {
+              if (signal == null) return 'Directional signal unavailable.';
+              const s = Number(signal);
+              const dir = s > 0.05 ? 'bullish bias' : s < -0.05 ? 'bearish bias' : 'neutral/mixed';
+              return `Markov signal is ${s.toFixed(4)} (${dir}). ` +
+                `Positive means the transition matrix favors a bull next step; negative favors bear.`;
+            }
+
+            function stationaryText() {
+              if (bullProb == null || bearProb == null || sidewaysProb == null) {
+                return 'Stationary distribution unavailable.';
+              }
+              return `Long-run regime mix: Bull ${(Number(bullProb) * 100).toFixed(1)}%, ` +
+                `Sideways ${(Number(sidewaysProb) * 100).toFixed(1)}%, ` +
+                `Bear ${(Number(bearProb) * 100).toFixed(1)}%.`;
+            }
+
+            function persistenceText() {
+              const parts = [];
+              if (persBull != null) parts.push(`Bull stickiness: ${Number(persBull).toFixed(2)}`);
+              if (persSideways != null) parts.push(`Sideways stickiness: ${Number(persSideways).toFixed(2)}`);
+              if (persBear != null) parts.push(`Bear stickiness: ${Number(persBear).toFixed(2)}`);
+              if (!parts.length) return 'Persistence metrics unavailable.';
+              return 'Regime stickiness (higher = more persistent): ' + parts.join('; ') + '.';
+            }
+
+            function qualityText() {
+              const parts = [];
+              if (section.status === 'partial') parts.push('Report is partial — fewer than recommended training bars.');
+              if (missing.length) parts.push(`Missing metrics: ${missing.join(', ')}`);
+              if (wfAccuracy != null) parts.push(`Walk-forward accuracy: ${(Number(wfAccuracy) * 100).toFixed(1)}%`);
+              if (!parts.length) return 'No data quality issues reported.';
+              return parts.join('; ') + '.';
+            }
+
+            return `<div class="section"><h3>Regime Bias</h3><p>${regimeText()}</p></div>` +
+              `<div class="section"><h3>Signal</h3><p>${signalText()}</p></div>` +
+              `<div class="section"><h3>Stationary Mix</h3><p>${stationaryText()}</p></div>` +
+              `<div class="section"><h3>Persistence</h3><p>${persistenceText()}</p></div>` +
+              `<div class="section"><h3>Data Quality</h3><p>${qualityText()}</p></div>`;
+          }
+
           const REPORT_TEMPLATES = {
             "technical": renderTechnicalReport,
             "worth-buy-stocks": renderWorthBuyReport,
-            "markov-method": null,    // filled in Task 15
+            "markov-method": renderMarkovReport,
             "_fallback": renderGenericReport,
           };
 
@@ -2535,6 +2596,94 @@ def research_page() -> str:
             };
             const plotFn = plotFns[analyst];
             if (plotFn) plotFn(section, vizEl);
+          }
+
+          function plotMarkovCharts(section, vizEl) {
+            const bullProb = findObs({results: [section]}, 'markov_stationary_bull');
+            const sidewaysProb = findObs({results: [section]}, 'markov_stationary_sideways');
+            const bearProb = findObs({results: [section]}, 'markov_stationary_bear');
+            const persBull = findObs({results: [section]}, 'markov_persistence_bull');
+            const persSideways = findObs({results: [section]}, 'markov_persistence_sideways');
+            const persBear = findObs({results: [section]}, 'markov_persistence_bear');
+            const signal = findObs({results: [section]}, 'markov_signal');
+
+            let html = '';
+
+            // Stationary probability bar chart
+            if (bullProb != null && bearProb != null && sidewaysProb != null) {
+              html += '<div class="chart-box" id="chart-markov-stationary"></div>';
+              setTimeout(() => {
+                const trace = {
+                  type: 'bar',
+                  x: [Number(bullProb) * 100, Number(sidewaysProb) * 100, Number(bearProb) * 100],
+                  y: ['Bull', 'Sideways', 'Bear'],
+                  orientation: 'h',
+                  marker: {color: ['#22c55e', '#f59e0b', '#ef4444']},
+                  text: [Number(bullProb) * 100, Number(sidewaysProb) * 100, Number(bearProb) * 100]
+                    .map(v => v.toFixed(1) + '%'),
+                  textposition: 'outside',
+                };
+                Plotly.newPlot('chart-markov-stationary', [trace], {
+                  margin: {l: 80, r: 60, t: 10, b: 10},
+                  height: 150,
+                  title: 'Stationary Probabilities',
+                  xaxis: {range: [0, 100], ticksuffix: '%'},
+                }, {responsive: true, displaylogo: false,
+                  modeBarButtonsToRemove: ['select2d', 'lasso2d']});
+              }, 50);
+            }
+
+            // Persistence bars
+            if (persBull != null && persSideways != null && persBear != null) {
+              html += '<div class="chart-box" id="chart-markov-persistence"></div>';
+              setTimeout(() => {
+                const trace = {
+                  type: 'bar',
+                  x: [Number(persBull), Number(persSideways), Number(persBear)],
+                  y: ['Bull Persistence', 'Sideways Persistence', 'Bear Persistence'],
+                  orientation: 'h',
+                  marker: {color: ['#22c55e', '#f59e0b', '#ef4444']},
+                  text: [Number(persBull), Number(persSideways), Number(persBear)]
+                    .map(v => v.toFixed(2)),
+                  textposition: 'outside',
+                };
+                Plotly.newPlot('chart-markov-persistence', [trace], {
+                  margin: {l: 140, r: 60, t: 10, b: 10},
+                  height: 150,
+                  title: 'Persistence',
+                }, {responsive: true, displaylogo: false,
+                  modeBarButtonsToRemove: ['select2d', 'lasso2d']});
+              }, 50);
+            }
+
+            // Signal gauge
+            if (signal != null) {
+              html += '<div class="chart-box" id="chart-markov-signal"></div>';
+              setTimeout(() => {
+                const s = Number(signal);
+                const trace = {
+                  type: 'indicator',
+                  mode: 'gauge+number+delta',
+                  value: s,
+                  title: {text: 'Directional Bias'},
+                  gauge: {
+                    axis: {range: [-1, 1]},
+                    bar: {color: s > 0 ? '#22c55e' : '#ef4444'},
+                    steps: [
+                      {range: [-1, -0.05], color: '#fee2e2'},
+                      {range: [-0.05, 0.05], color: '#f1f5f9'},
+                      {range: [0.05, 1], color: '#dcfce7'},
+                    ],
+                  },
+                };
+                Plotly.newPlot('chart-markov-signal', [trace], {margin: {t: 30, b: 10}}, {
+                  responsive: true, displaylogo: false,
+                  modeBarButtonsToRemove: ['select2d', 'lasso2d'],
+                });
+              }, 50);
+            }
+
+            vizEl.innerHTML = html;
           }
 
           function plotWorthBuyCharts(section, vizEl) {
