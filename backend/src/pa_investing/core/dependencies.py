@@ -49,6 +49,7 @@ from pa_investing.market_data.twelve_data import TwelveDataProvider
 from pa_investing.notion.client import FakeNotionClient, NotionClient
 from pa_investing.notion.live import LiveNotionClient
 from pa_investing.notion.sync import NotionSync
+from pa_investing.research.trade_agent import TradeAgentClient
 from pa_investing.workflows.daily_review import DailyReviewPersistence, DailyReviewWorkflow
 from pa_investing.workflows.full_refresh import FullRefreshWorkflow
 from pa_investing.workflows.refresh_and_sync import RefreshAndSyncWorkflow
@@ -215,6 +216,17 @@ def get_operations_analysis_context() -> Iterator[OperationsAnalysisContext]:
             reconciliation_repository=BrokerReconciliationRepository(session),
             provider_run_repository=ProviderRunRepository(session),
         )
+
+
+def get_trade_agent_client(
+    settings: Annotated[Settings, Depends(get_settings)],
+) -> TradeAgentClient:
+    return TradeAgentClient(
+        base_url=settings.trade_research_base_url,
+        bearer_token=settings.trade_research_api_token,
+        enabled=settings.trade_research_enabled,
+        timeout_seconds=settings.trade_research_timeout_seconds,
+    )
 
 
 def get_instrument_resolution_service() -> Iterator[InstrumentResolutionService]:

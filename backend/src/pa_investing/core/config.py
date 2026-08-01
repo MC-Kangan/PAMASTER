@@ -40,3 +40,7 @@ class Settings(BaseSettings):
     analytics_auth_username: str = ""
     analytics_auth_password: str = ""
     workflow_api_token: str = ""
+    trade_research_enabled: bool = False
+    trade_research_base_url: str = "http://127.0.0.1:8002"
+    trade_research_api_token: str = ""
+    trade_research_timeout_seconds: float = 20.0

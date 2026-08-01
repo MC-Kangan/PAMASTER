@@ -10,6 +10,10 @@ def test_settings_defaults_are_safe_for_local_tests() -> None:
     assert settings.database_url.startswith("sqlite+pysqlite://")
     assert settings.workflow_api_token == ""
     assert settings.ibkr_flex_refresh_cooldown_seconds == 900
+    assert settings.trade_research_enabled is False
+    assert settings.trade_research_base_url == "http://127.0.0.1:8002"
+    assert settings.trade_research_api_token == ""
+    assert settings.trade_research_timeout_seconds == 20.0
 
 
 def test_settings_include_live_notion_and_market_data_fields() -> None:
@@ -26,6 +30,9 @@ def test_settings_include_live_notion_and_market_data_fields() -> None:
         twelve_data_api_key="twelve-key",
         ibkr_gateway_base_url="https://127.0.0.1:5000/v1/api",
         ibkr_flex_history_query_id="history-query",
+        trade_research_enabled=True,
+        trade_research_base_url="http://trade-research-api:8000",
+        trade_research_api_token="trade-token",
     )
 
     assert settings.notion_signals_database_id == "signals-db"
@@ -38,3 +45,6 @@ def test_settings_include_live_notion_and_market_data_fields() -> None:
     assert settings.twelve_data_api_key == "twelve-key"
     assert settings.ibkr_gateway_base_url == "https://127.0.0.1:5000/v1/api"
     assert settings.ibkr_flex_history_query_id == "history-query"
+    assert settings.trade_research_enabled is True
+    assert settings.trade_research_base_url == "http://trade-research-api:8000"
+    assert settings.trade_research_api_token == "trade-token"
