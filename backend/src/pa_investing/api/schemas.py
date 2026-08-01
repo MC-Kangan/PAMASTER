@@ -1,6 +1,6 @@
 from datetime import date, datetime
 from decimal import Decimal
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel
 
@@ -140,6 +140,59 @@ class CurrentPortfolioResponse(BaseModel):
     nav: str
     reporting_coverage: str
     holdings: list[CurrentHoldingResponse]
+
+
+class ResearchPositionResponse(BaseModel):
+    account_id: str
+    instrument_id: str | None
+    symbol: str
+    name: str
+    asset_class: str
+    currency: str
+    venue: str | None
+    trade_agent_market: str | None
+    quantity: str
+    average_cost: str | None
+    latest_price: str | None
+    unrealized_pnl: str | None
+    cost_status: str
+
+
+class ResearchSkillResponse(BaseModel):
+    name: str
+    description: str
+    immutable: bool = True
+    parameters: dict | None = None
+
+
+class ResearchSkillsResponse(BaseModel):
+    configured: bool
+    status: Literal["available", "disabled", "unavailable"]
+    detail: str | None = None
+    skills: list[ResearchSkillResponse] = []
+
+
+class ResearchRunRequest(BaseModel):
+    account_id: str | None = None
+    instrument_id: str | None = None
+    symbol: str | None = None
+    market: str | None = None
+    skills: list[str]
+    skill_parameters: dict[str, dict[str, Any]] = {}
+
+
+class ResearchRunResultResponse(BaseModel):
+    skill: str
+    status: Literal["complete", "failed"]
+    detail: str | None = None
+    report: dict | None = None
+
+
+class ResearchRunResponse(BaseModel):
+    symbol: str
+    market: str
+    position: ResearchPositionResponse | None = None
+    results: list[ResearchRunResultResponse]
 
 
 class TransactionResponse(BaseModel):
