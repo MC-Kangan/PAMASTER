@@ -1508,6 +1508,191 @@ def test_performance_analysis_page_renders() -> None:
     assert "P&amp;L" not in script
 
 
+@pytest.fixture
+def client() -> TestClient:
+    return _public_test_client()
+
+
+class TestResearchSkillsWithParameters:
+    def test_research_skills_includes_parameters_when_available(self, mocker) -> None:
+        """When TradeAgent is configured and returns skills with parameters,
+        the PAMASTER endpoint should forward the parameters field."""
+        mock_instance = mocker.MagicMock()
+        mock_instance.configured = True
+        mock_instance.list_skills.return_value = [
+            {
+                "name": "technical",
+                "description": "Technical analysis",
+                "immutable": True,
+                "parameters": {
+                    "properties": {
+                        "window": {"type": "integer", "default": 20}
+                    }
+                },
+            },
+            {
+                "name": "fundamental",
+                "description": "Fundamental analysis",
+                "immutable": True,
+                "parameters": None,
+            },
+        ]
+
+        app = create_app()
+        app.dependency_overrides[get_settings] = lambda: Settings(
+            analytics_auth_enabled=False,
+        )
+        app.dependency_overrides[get_trade_agent_client] = lambda: mock_instance
+        test_client = TestClient(app)
+
+        response = test_client.get("/analysis/research/skills")
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["status"] == "available"
+        skills = {s["name"]: s for s in payload["skills"]}
+        assert skills["technical"]["parameters"] is not None
+        assert skills["technical"]["parameters"]["properties"]["window"]["default"] == 20
+        assert skills["fundamental"]["parameters"] is None
+
+    def test_research_skills_disabled_no_parameters(self, client: TestClient) -> None:
+        """When TradeAgent is disabled, parameters should not appear."""
+        response = client.get("/analysis/research/skills")
+        payload = response.json()
+        if payload["status"] == "disabled":
+            assert "parameters" not in payload or not payload.get("skills")
+
+
+class TestResearchRunWithParameters:
+    def test_run_research_sends_skill_parameters(self, mocker) -> None:
+        """The run endpoint should forward skill_parameters to TradeAgentClient."""
+        mock_instance = mocker.MagicMock()
+        mock_instance.configured = True
+        mock_instance.run_skill.return_value = {
+            "generated_at": "2026-01-01T00:00:00Z",
+            "instrument": {"symbol": "AAPL", "market": "US"},
+            "request_id": "test-id",
+            "results": [{
+                "analyst": "technical",
+                "signal": "neutral",
+                "status": "complete",
+                "observations": [],
+                "methods": [],
+                "citations": [],
+                "missing_metrics": [],
+                "limitations": [],
+                "failure_category": "none",
+                "summary": "test",
+            }],
+        }
+
+        app = create_app()
+        app.dependency_overrides[get_settings] = lambda: Settings(
+            analytics_auth_enabled=False,
+        )
+        app.dependency_overrides[get_trade_agent_client] = lambda: mock_instance
+        app.dependency_overrides[get_portfolio_analysis_context] = lambda: (
+            PortfolioAnalysisContext(
+                position_repository=FakePositionRepository([]),
+                app_setting_repository=FakeAppSettingRepository(),
+                fx_rate_repository=FakeFxRateRepository(),
+            )
+        )
+        test_client = TestClient(app)
+
+        response = test_client.post("/analysis/research/run", json={
+            "symbol": "AAPL",
+            "market": "US",
+            "skills": ["technical"],
+            "skill_parameters": {"technical": {"window": 10}},
+        })
+        assert response.status_code == 200
+        # Verify skill_parameters was passed to client
+        call_kwargs = mock_instance.run_skill.call_args.kwargs
+        assert call_kwargs["skill_parameters"] == {"technical": {"window": 10}}
+        assert call_kwargs["skill"] == "technical"
+
+    def test_run_research_empty_skill_parameters(self, mocker) -> None:
+        """skill_parameters defaults to empty dict, should not cause errors."""
+        mock_instance = mocker.MagicMock()
+        mock_instance.configured = True
+        mock_instance.run_skill.return_value = {
+            "generated_at": "2026-01-01T00:00:00Z",
+            "instrument": {"symbol": "IBM", "market": "US"},
+            "request_id": "test-id-2",
+            "results": [{
+                "analyst": "fundamental",
+                "signal": "not_assessed",
+                "status": "partial",
+                "observations": [],
+                "methods": [],
+                "citations": [],
+                "missing_metrics": [],
+                "limitations": [],
+                "failure_category": "none",
+                "summary": "test",
+            }],
+        }
+
+        app = create_app()
+        app.dependency_overrides[get_settings] = lambda: Settings(
+            analytics_auth_enabled=False,
+        )
+        app.dependency_overrides[get_trade_agent_client] = lambda: mock_instance
+        app.dependency_overrides[get_portfolio_analysis_context] = lambda: (
+            PortfolioAnalysisContext(
+                position_repository=FakePositionRepository([]),
+                app_setting_repository=FakeAppSettingRepository(),
+                fx_rate_repository=FakeFxRateRepository(),
+            )
+        )
+        test_client = TestClient(app)
+
+        response = test_client.post("/analysis/research/run", json={
+            "symbol": "IBM",
+            "market": "US",
+            "skills": ["fundamental"],
+        })
+        assert response.status_code == 200
+        call_kwargs = mock_instance.run_skill.call_args.kwargs
+        assert call_kwargs.get("skill_parameters") == {}
+
+
+class TestResearchPageContent:
+    def test_research_page_includes_plotly_cdn(self, client: TestClient) -> None:
+        """Research page HTML must include Plotly CDN script."""
+        response = client.get("/analysis/research")
+        assert response.status_code == 200
+        html = response.text
+        assert "plotly-2.35.2.min.js" in html
+
+    def test_research_page_includes_template_functions(self, client: TestClient) -> None:
+        """Research page HTML must include render functions for all templates."""
+        response = client.get("/analysis/research")
+        html = response.text
+        assert "renderTechnicalReport" in html
+        assert "renderWorthBuyReport" in html
+        assert "renderMarkovReport" in html
+        assert "renderGenericReport" in html
+        assert "REPORT_TEMPLATES" in html
+        assert "ENTRY_CLASS_LABELS" in html
+        assert "REGIME_LABELS" in html
+
+    def test_research_page_includes_skill_parameters_js(self, client: TestClient) -> None:
+        """Research page must include JS for collecting skill parameters."""
+        response = client.get("/analysis/research")
+        html = response.text
+        assert "skill_parameters" in html
+        assert "skill-params" in html
+
+    def test_research_page_no_trade_agent_token_leak(
+        self, client: TestClient, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Browser must never receive the TradeAgent bearer token."""
+        monkeypatch.setenv("PA_TRADE_RESEARCH_API_TOKEN", "secret-token-123")
+        response = client.get("/analysis/research")
+        assert "secret-token-123" not in response.text
+
+
 def test_operations_and_transactions_routes_return_operational_data() -> None:
     observed_at = datetime(2026, 7, 10, 12, tzinfo=UTC)
 

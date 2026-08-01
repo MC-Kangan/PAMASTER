@@ -142,3 +142,33 @@ def test_trade_agent_client_omits_skill_parameters_when_none(
     client.run_skill(skill="technical", symbol="AAPL", market="US")
 
     assert "skill_parameters" not in captured["json"]
+
+
+class TestRunSkillWithParameters:
+    def test_skill_parameters_included_in_request_body(self) -> None:
+        """Verify skill_parameters are forwarded in the POST body."""
+        client = TradeAgentClient(
+            base_url="http://127.0.0.1:8002",
+            bearer_token="test",
+            enabled=True,
+            timeout_seconds=1,
+        )
+        import inspect
+
+        sig = inspect.signature(client.run_skill)
+        assert "skill_parameters" in sig.parameters
+        param = sig.parameters["skill_parameters"]
+        assert param.default is None
+
+    def test_run_skill_without_parameters_still_works(self) -> None:
+        """Backward compat: calling without skill_parameters should not break."""
+        client = TradeAgentClient(
+            base_url="http://127.0.0.1:8002",
+            bearer_token="test",
+            enabled=True,
+            timeout_seconds=1,
+        )
+        import inspect
+
+        sig = inspect.signature(client.run_skill)
+        assert sig.parameters["skill_parameters"].default is None
