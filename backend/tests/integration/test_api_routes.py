@@ -23,6 +23,7 @@ from pa_investing.core.dependencies import (
     get_position_chart_service,
     get_refresh_and_sync_workflow,
     get_settings,
+    get_trade_agent_client,
 )
 from pa_investing.domain.enums import (
     AdjustmentMode,
@@ -262,6 +263,90 @@ class FakeHistoricalDataService:
         )
 
 
+class FakePositionRepository:
+    def __init__(self, positions: list[Position]) -> None:
+        self._positions = positions
+
+    def list_open_positions(self) -> list[Position]:
+        return self._positions
+
+
+class FakeAppSettingRepository:
+    def get(self, _key: str, default: str) -> str:
+        return default
+
+
+class FakeFxRateRepository:
+    def latest(self, _base: str, _quote: str) -> None:
+        return None
+
+
+class FakeTradeAgentClient:
+    configured = True
+
+    def list_skills(self) -> list[dict[str, object]]:
+        return [
+            {
+                "name": "technical",
+                "description": "Technical analysis",
+                "immutable": True,
+                "parameters": {"lookback_days": {"type": "integer"}},
+            },
+            {
+                "name": "markov-method",
+                "description": "Regime analysis",
+                "immutable": True,
+            },
+        ]
+
+    def run_skill(
+        self,
+        *,
+        skill: str,
+        symbol: str,
+        market: str,
+        position: Position | None = None,
+        skill_parameters: dict[str, dict[str, object]] | None = None,
+    ) -> dict[str, object]:
+        assert symbol == "AAPL"
+        assert market == "US"
+        assert position is not None
+        assert skill_parameters == {"technical": {"lookback_days": 90}}
+        return {
+            "instrument": {"symbol": symbol, "market": market},
+            "results": [
+                {
+                    "analyst": skill,
+                    "status": "complete",
+                    "signal": "neutral",
+                    "observations": [
+                        {
+                            "metric": "price_return",
+                            "value": 0.12,
+                            "source": "derived",
+                        }
+                    ],
+                }
+            ],
+        }
+
+
+class FailingTradeAgentClient:
+    configured = True
+
+    def list_skills(self) -> list[dict[str, object]]:
+        from pa_investing.research.trade_agent import TradeAgentClientError
+
+        raise TradeAgentClientError(
+            "TradeAgent did not answer this endpoint; check "
+            "PA_TRADE_RESEARCH_BASE_URL points to TradeAgent, not PAMASTER"
+        )
+
+
+class DisabledTradeAgentClient:
+    configured = False
+
+
 def _public_test_client() -> TestClient:
     app = create_app()
     app.dependency_overrides[get_settings] = lambda: Settings(
@@ -368,6 +453,137 @@ def test_position_chart_page_has_trading_controls_and_indicators() -> None:
     assert "openGroup.label = 'Open positions'" in response.text
     assert "closedGroup.label = 'Closed positions'" in response.text
     assert "state.range = 'ytd'" in response.text
+
+
+def test_research_page_and_pwa_metadata_render() -> None:
+    client = _public_test_client()
+
+    page = client.get("/analysis/research")
+    manifest = client.get("/analysis/manifest.webmanifest")
+    icon = client.get("/analysis/app-icon.svg")
+    portfolio = client.get("/analysis/portfolio")
+    chart = client.get("/analysis/position-chart")
+
+    assert page.status_code == 200
+    assert "Research Playground" in page.text
+    assert "Manual research / no current position" in page.text
+    assert "/analysis/research/positions" in page.text
+    assert "/analysis/research/skills" in page.text
+    assert "/analysis/research/run" in page.text
+    assert "apple-mobile-web-app-capable" in page.text
+    assert 'href="/analysis/research"' in portfolio.text
+    assert 'href="/analysis/research"' in chart.text
+    assert manifest.status_code == 200
+    assert manifest.json()["display"] == "standalone"
+    assert manifest.json()["start_url"] == "/analysis/portfolio"
+    assert icon.status_code == 200
+    assert icon.headers["content-type"].startswith("image/svg+xml")
+
+
+def test_research_skills_route_returns_disabled_state_without_trade_agent() -> None:
+    app = create_app()
+    app.dependency_overrides[get_settings] = lambda: Settings(
+        analytics_auth_enabled=False,
+    )
+    app.dependency_overrides[get_trade_agent_client] = lambda: DisabledTradeAgentClient()
+    client = TestClient(app)
+
+    response = client.get("/analysis/research/skills")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "configured": False,
+        "status": "disabled",
+        "detail": "TradeAgent is not configured.",
+        "skills": [],
+    }
+
+
+def test_research_skills_route_returns_unavailable_state_for_trade_agent_errors() -> None:
+    app = create_app()
+    app.dependency_overrides[get_settings] = lambda: Settings(
+        analytics_auth_enabled=False,
+        trade_research_enabled=True,
+        trade_research_api_token="test-token",
+    )
+    app.dependency_overrides[get_trade_agent_client] = lambda: FailingTradeAgentClient()
+    client = TestClient(app)
+
+    response = client.get("/analysis/research/skills")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "configured": True,
+        "status": "unavailable",
+        "detail": (
+            "TradeAgent did not answer this endpoint; check "
+            "PA_TRADE_RESEARCH_BASE_URL points to TradeAgent, not PAMASTER"
+        ),
+        "skills": [],
+    }
+
+
+def test_research_positions_and_run_proxy_trade_agent() -> None:
+    position = Position(
+        account_id="acct-1",
+        instrument=Instrument(
+            symbol="AAPL",
+            name="Apple Inc.",
+            asset_class=AssetClass.EQUITY,
+            currency="USD",
+            instrument_id="aapl-id",
+            venue="NASDAQ",
+        ),
+        quantity=Decimal("10"),
+        average_cost=Decimal("150"),
+        latest_price=Decimal("175"),
+    )
+    app = create_app()
+    app.dependency_overrides[get_settings] = lambda: Settings(
+        analytics_auth_enabled=False,
+        trade_research_enabled=True,
+        trade_research_api_token="test-token",
+    )
+    app.dependency_overrides[get_portfolio_analysis_context] = lambda: PortfolioAnalysisContext(
+        position_repository=FakePositionRepository([position]),
+        app_setting_repository=FakeAppSettingRepository(),
+        fx_rate_repository=FakeFxRateRepository(),
+    )
+    app.dependency_overrides[get_trade_agent_client] = lambda: FakeTradeAgentClient()
+    client = TestClient(app)
+
+    positions = client.get("/analysis/research/positions")
+    skills = client.get("/analysis/research/skills")
+    run = client.post(
+        "/analysis/research/run",
+        json={
+            "account_id": "acct-1",
+            "instrument_id": "aapl-id",
+            "symbol": "AAPL",
+            "market": "US",
+            "skills": ["technical"],
+            "skill_parameters": {"technical": {"lookback_days": 90}},
+        },
+    )
+
+    assert positions.status_code == 200
+    assert positions.json()[0]["trade_agent_market"] == "US"
+    assert positions.json()[0]["average_cost"] == "150.00"
+    assert positions.json()[0]["latest_price"] == "175.00"
+    assert positions.json()[0]["unrealized_pnl"] is None
+    assert skills.status_code == 200
+    assert [item["name"] for item in skills.json()["skills"]] == [
+        "technical",
+        "markov-method",
+    ]
+    assert skills.json()["skills"][0]["parameters"] == {
+        "lookback_days": {"type": "integer"}
+    }
+    assert run.status_code == 200
+    assert run.json()["symbol"] == "AAPL"
+    assert run.json()["market"] == "US"
+    assert run.json()["results"][0]["status"] == "complete"
+    assert "test-token" not in run.text
 
 
 def test_position_chart_data_route_serializes_candles_and_reconciliation() -> None:

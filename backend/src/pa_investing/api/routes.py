@@ -3,7 +3,7 @@ from decimal import Decimal
 from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, Response
 
 from pa_investing.analytics.daily_pnl import (
     build_broker_daily_pnl,
@@ -19,6 +19,7 @@ from pa_investing.analytics.valuation import apply_reporting_currency
 from pa_investing.analytics_app.pages import (
     portfolio_page,
     position_chart_page,
+    research_page,
     signal_page,
 )
 from pa_investing.api.auth import (
@@ -53,6 +54,12 @@ from pa_investing.api.schemas import (
     ReconciliationResponse,
     RefreshAndSyncRequest,
     RefreshAndSyncResponse,
+    ResearchPositionResponse,
+    ResearchRunRequest,
+    ResearchRunResponse,
+    ResearchRunResultResponse,
+    ResearchSkillResponse,
+    ResearchSkillsResponse,
     TransactionResponse,
 )
 from pa_investing.core.config import Settings
@@ -70,6 +77,7 @@ from pa_investing.core.dependencies import (
     get_position_chart_service,
     get_refresh_and_sync_workflow,
     get_settings,
+    get_trade_agent_client,
 )
 from pa_investing.db.repositories import (
     BrokerDailyNavRepository,
@@ -77,6 +85,7 @@ from pa_investing.db.repositories import (
     PortfolioSnapshotRepository,
 )
 from pa_investing.domain.enums import CostBasisStatus
+from pa_investing.domain.models import Position
 from pa_investing.instruments.resolution import (
     InstrumentResolutionService,
     InstrumentSearchResult,
@@ -86,6 +95,11 @@ from pa_investing.market_data.history.router import HistoricalDataUnavailable
 from pa_investing.market_data.history.service import HistoricalDataService
 from pa_investing.notion.sync import PORTFOLIO_BASE_CURRENCY_KEY
 from pa_investing.presentation.fields import serialize_decimal
+from pa_investing.research.trade_agent import (
+    TradeAgentClient,
+    TradeAgentClientError,
+    market_for_trade_agent,
+)
 from pa_investing.workflows.agent_api import DailyReviewResult
 from pa_investing.workflows.broker_import import BrokerImportResult
 from pa_investing.workflows.full_refresh import (
@@ -189,6 +203,197 @@ def position_chart_analysis(
     _: Annotated[None, Depends(require_analytics_auth)],
 ) -> str:
     return position_chart_page()
+
+
+@router.get("/analysis/research", response_class=HTMLResponse)
+def research_analysis(
+    _: Annotated[None, Depends(require_analytics_auth)],
+) -> str:
+    return research_page()
+
+
+@router.get("/analysis/manifest.webmanifest")
+def analysis_manifest(
+    _: Annotated[None, Depends(require_analytics_auth)],
+) -> dict[str, object]:
+    return {
+        "name": "PA Investing",
+        "short_name": "PA Investing",
+        "start_url": "/analysis/portfolio",
+        "scope": "/analysis/",
+        "display": "standalone",
+        "background_color": "#f5f7fb",
+        "theme_color": "#f5f7fb",
+        "icons": [
+            {
+                "src": "/analysis/app-icon.svg",
+                "sizes": "any",
+                "type": "image/svg+xml",
+                "purpose": "any maskable",
+            }
+        ],
+    }
+
+
+@router.get("/analysis/app-icon.svg")
+def analysis_app_icon(
+    _: Annotated[None, Depends(require_analytics_auth)],
+) -> Response:
+    return Response(
+        content=(
+            '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">'
+            '<rect width="512" height="512" rx="96" fill="#f5f7fb"/>'
+            '<path d="M96 338h320" stroke="#94a3b8" stroke-width="24" '
+            'stroke-linecap="round"/>'
+            '<path d="M116 318l72-84 62 48 92-126 54 44" fill="none" '
+            'stroke="#2563eb" stroke-width="34" stroke-linecap="round" '
+            'stroke-linejoin="round"/>'
+            '<circle cx="188" cy="234" r="18" fill="#16a34a"/>'
+            '<circle cx="342" cy="156" r="18" fill="#dc2626"/>'
+            "</svg>"
+        ),
+        media_type="image/svg+xml",
+    )
+
+
+@router.get(
+    "/analysis/research/positions",
+    response_model=list[ResearchPositionResponse],
+)
+def research_positions(
+    context: Annotated[
+        PortfolioAnalysisContext,
+        Depends(get_portfolio_analysis_context),
+    ],
+    _: Annotated[None, Depends(require_analytics_auth)],
+) -> list[ResearchPositionResponse]:
+    return [
+        _research_position_response(position)
+        for position in sorted(
+            context.position_repository.list_open_positions(),
+            key=lambda item: item.instrument.symbol,
+        )
+    ]
+
+
+@router.get(
+    "/analysis/research/skills",
+    response_model=ResearchSkillsResponse,
+)
+def research_skills(
+    client: Annotated[TradeAgentClient, Depends(get_trade_agent_client)],
+    _: Annotated[None, Depends(require_analytics_auth)],
+) -> ResearchSkillsResponse:
+    if not client.configured:
+        return ResearchSkillsResponse(
+            configured=False,
+            status="disabled",
+            detail="TradeAgent is not configured.",
+        )
+    try:
+        skills = client.list_skills()
+    except TradeAgentClientError as exc:
+        return ResearchSkillsResponse(
+            configured=True,
+            status="unavailable",
+            detail=str(exc),
+        )
+    return ResearchSkillsResponse(
+        configured=True,
+        status="available",
+        skills=[
+            ResearchSkillResponse(
+                name=str(item.get("name") or ""),
+                description=str(item.get("description") or ""),
+                immutable=bool(item.get("immutable", True)),
+                parameters=item.get("parameters"),
+            )
+            for item in skills
+            if item.get("name")
+        ],
+    )
+
+
+@router.post(
+    "/analysis/research/run",
+    response_model=ResearchRunResponse,
+)
+def run_research(
+    payload: ResearchRunRequest,
+    context: Annotated[
+        PortfolioAnalysisContext,
+        Depends(get_portfolio_analysis_context),
+    ],
+    client: Annotated[TradeAgentClient, Depends(get_trade_agent_client)],
+    _: Annotated[None, Depends(require_analytics_auth)],
+) -> ResearchRunResponse:
+    if not client.configured:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="TradeAgent is not configured.",
+        )
+    skills = [item.strip() for item in payload.skills if item.strip()]
+    if not skills:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Select at least one TradeAgent skill.",
+        )
+    position = _find_research_position(
+        context.position_repository.list_open_positions(),
+        account_id=payload.account_id,
+        instrument_id=payload.instrument_id,
+    )
+    symbol = (payload.symbol or (position.instrument.symbol if position else "")).strip().upper()
+    market = (
+        payload.market
+        or (
+            market_for_trade_agent(
+                asset_class=position.instrument.asset_class,
+                venue=position.instrument.venue,
+            )
+            if position
+            else None
+        )
+        or ""
+    ).strip().upper()
+    if not symbol or not market:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Symbol and market are required.",
+        )
+    skill_params = payload.skill_parameters
+    results: list[ResearchRunResultResponse] = []
+    for skill in skills:
+        try:
+            report = client.run_skill(
+                skill=skill,
+                symbol=symbol,
+                market=market,
+                position=position,
+                skill_parameters=skill_params,
+            )
+        except TradeAgentClientError as exc:
+            results.append(
+                ResearchRunResultResponse(
+                    skill=skill,
+                    status="failed",
+                    detail=str(exc),
+                )
+            )
+        else:
+            results.append(
+                ResearchRunResultResponse(
+                    skill=skill,
+                    status="complete",
+                    report=report,
+                )
+            )
+    return ResearchRunResponse(
+        symbol=symbol,
+        market=market,
+        position=_research_position_response(position) if position else None,
+        results=results,
+    )
 
 
 @router.get(
@@ -781,6 +986,51 @@ def _refresh_response(
     )
 
 
+def _research_position_response(position: Position) -> ResearchPositionResponse:
+    return ResearchPositionResponse(
+        account_id=position.account_id,
+        instrument_id=position.instrument.instrument_id,
+        symbol=position.instrument.symbol,
+        name=position.instrument.name,
+        asset_class=position.instrument.asset_class.value,
+        currency=position.instrument.currency,
+        venue=position.instrument.venue,
+        trade_agent_market=market_for_trade_agent(
+            asset_class=position.instrument.asset_class,
+            venue=position.instrument.venue,
+        ),
+        quantity=_format_decimal(position.quantity),
+        average_cost=_format_decimal_2dp_or_none(
+            position.broker_average_cost or position.average_cost
+        ),
+        latest_price=_format_decimal_2dp_or_none(position.latest_price),
+        unrealized_pnl=_format_decimal_2dp_or_none(
+            None
+            if position.latest_price is None
+            or position.cost_basis_status is CostBasisStatus.UNAVAILABLE
+            else position.unrealized_pnl
+        ),
+        cost_status=position.cost_basis_status.value,
+    )
+
+
+def _find_research_position(
+    positions: list[Position],
+    *,
+    account_id: str | None,
+    instrument_id: str | None,
+) -> Position | None:
+    if not account_id or not instrument_id:
+        return None
+    for position in positions:
+        if (
+            position.account_id == account_id
+            and position.instrument.instrument_id == instrument_id
+        ):
+            return position
+    return None
+
+
 def _format_decimal(value: object) -> str:
     return serialize_decimal(value)
 
@@ -789,6 +1039,12 @@ def _format_decimal_or_none(value: Decimal | None) -> str | None:
     if value is None:
         return None
     return _format_decimal(value)
+
+
+def _format_decimal_2dp_or_none(value: Decimal | None) -> str | None:
+    if value is None:
+        return None
+    return f"{value.quantize(Decimal('0.01')):.2f}"
 
 
 def _parse_refresh_timestamp(value: str | None) -> datetime | None:
