@@ -2414,9 +2414,76 @@ def research_page() -> str:
               `<div class="section"><h3>Volume & Data Quality</h3><p>${volumeText()}</p></div>`;
           }
 
+          function renderWorthBuyReport(report, section) {
+            const composite = findObs(report, 'worth_buy_composite');
+            const riskVeto = findObs(report, 'worth_buy_risk_veto');
+            const entryClass = findObs(report, 'worth_buy_entry_classification');
+            const entryPrice = findObs(report, 'worth_buy_entry_price');
+            const stopPrice = findObs(report, 'worth_buy_stop_price');
+            const targetPrice = findObs(report, 'worth_buy_target_price');
+            const verdict = findObs(report, 'worth_buy_verdict');
+            const rsSPY = findObs(report, 'worth_buy_relative_strength');
+            const missing = section.missing_metrics || [];
+            const limitations = section.limitations || [];
+
+            function setupQuality() {
+              const signal = section.signal || 'not_assessed';
+              if (signal === 'bullish' && section.status === 'complete') {
+                return 'The setup is constructive, but still validate risk and position context separately.';
+              }
+              if (signal === 'neutral') {
+                return 'This is a watchlist setup rather than a high-conviction entry.';
+              }
+              if (signal === 'bearish') {
+                return 'The current setup has enough risk or weak confirmation to avoid upgrading the idea.';
+              }
+              return 'The model cannot score this reliably from the available data.';
+            }
+
+            function compositeText() {
+              if (composite == null) return 'Composite score unavailable.';
+              const c = Number(composite);
+              const quality = c >= 70 ? 'strong' : c >= 40 ? 'moderate' : 'weak';
+              return `Composite trend-quality score is ${c.toFixed(1)}/100 (${quality}). ` +
+                `Higher scores indicate stronger momentum, relative strength, and trend efficiency.`;
+            }
+
+            function riskText() {
+              if (riskVeto == null) return 'Risk veto score unavailable.';
+              const r = Number(riskVeto);
+              const level = r >= 20 ? 'elevated' : r >= 10 ? 'moderate' : 'low';
+              return `Risk veto score is ${r.toFixed(1)} (${level}). ` +
+                `Higher scores flag more reasons to reduce confidence.`;
+            }
+
+            function entryText() {
+              if (entryClass == null) return 'Entry classification unavailable.';
+              const code = Math.round(Number(entryClass));
+              const label = ENTRY_CLASS_LABELS[code] || `Unknown (${code})`;
+              return `Entry class: ${label}.`;
+            }
+
+            function refLevelsText() {
+              const parts = [];
+              if (entryPrice != null) parts.push(`Entry reference: ${Number(entryPrice).toFixed(2)}`);
+              if (stopPrice != null) parts.push(`Stop reference: ${Number(stopPrice).toFixed(2)}`);
+              if (targetPrice != null) parts.push(`Target reference: ${Number(targetPrice).toFixed(2)}`);
+              if (!parts.length) return 'No reference levels available.';
+              return 'Model reference levels (not order instructions): ' + parts.join('; ') + '.';
+            }
+
+            return `<div class="section"><h3>Setup Quality</h3><p>${setupQuality()}</p></div>` +
+              `<div class="section"><h3>Composite Score</h3><p>${compositeText()}</p></div>` +
+              `<div class="section"><h3>Risk Veto</h3><p>${riskText()}</p></div>` +
+              `<div class="section"><h3>Entry Class</h3><p>${entryText()}</p></div>` +
+              `<div class="section"><h3>Reference Levels</h3><p>${refLevelsText()}</p></div>` +
+              (missing.length ? `<div class="section"><h3>Data Quality</h3><p>Missing: ${missing.join(', ')}. ` +
+                (limitations.length ? `Limitations: ${limitations.join(', ')}.` : '') + `</p></div>` : '');
+          }
+
           const REPORT_TEMPLATES = {
             "technical": renderTechnicalReport,
-            "worth-buy-stocks": null, // filled in Task 14
+            "worth-buy-stocks": renderWorthBuyReport,
             "markov-method": null,    // filled in Task 15
             "_fallback": renderGenericReport,
           };
@@ -2468,6 +2535,76 @@ def research_page() -> str:
             };
             const plotFn = plotFns[analyst];
             if (plotFn) plotFn(section, vizEl);
+          }
+
+          function plotWorthBuyCharts(section, vizEl) {
+            const composite = findObs({results: [section]}, 'worth_buy_composite');
+            const riskVeto = findObs({results: [section]}, 'worth_buy_risk_veto');
+            const entryPrice = findObs({results: [section]}, 'worth_buy_entry_price');
+            const stopPrice = findObs({results: [section]}, 'worth_buy_stop_price');
+            const targetPrice = findObs({results: [section]}, 'worth_buy_target_price');
+
+            let html = '';
+
+            // Composite gauge
+            if (composite != null) {
+              html += '<div class="chart-box" id="chart-wb-gauge"></div>';
+              setTimeout(() => {
+                const trace = {
+                  type: 'indicator',
+                  mode: 'gauge+number',
+                  value: Number(composite),
+                  title: {text: 'Composite Score'},
+                  gauge: {
+                    axis: {range: [0, 100]},
+                    bar: {color: '#2563eb'},
+                    steps: [
+                      {range: [0, 30], color: '#fee2e2'},
+                      {range: [30, 70], color: '#fef3c7'},
+                      {range: [70, 100], color: '#dcfce7'},
+                    ],
+                  },
+                };
+                Plotly.newPlot('chart-wb-gauge', [trace], {margin: {t: 30, b: 10}}, {
+                  responsive: true, displaylogo: false,
+                  modeBarButtonsToRemove: ['select2d', 'lasso2d'],
+                });
+              }, 50);
+            }
+
+            // Risk veto bar
+            if (riskVeto != null) {
+              html += '<div class="chart-box" id="chart-wb-risk"></div>';
+              setTimeout(() => {
+                const rv = Number(riskVeto);
+                const trace = {
+                  type: 'bar',
+                  x: [rv],
+                  y: ['Risk Veto'],
+                  orientation: 'h',
+                  marker: {color: rv > 15 ? '#ef4444' : rv > 5 ? '#f59e0b' : '#22c55e'},
+                  text: [rv.toFixed(1)],
+                  textposition: 'outside',
+                };
+                Plotly.newPlot('chart-wb-risk', [trace], {
+                  margin: {l: 80, r: 50, t: 10, b: 10},
+                  height: 100,
+                  xaxis: {range: [0, Math.max(30, rv + 5)]},
+                }, {responsive: true, displaylogo: false,
+                  modeBarButtonsToRemove: ['select2d', 'lasso2d']});
+              }, 50);
+            }
+
+            // Reference level cards
+            if (entryPrice != null || stopPrice != null || targetPrice != null) {
+              html += '<div class="ref-cards">';
+              if (entryPrice != null) html += `<div class="ref-card"><div class="ref-label">Entry Reference</div><div class="ref-value">${Number(entryPrice).toFixed(2)}</div></div>`;
+              if (stopPrice != null) html += `<div class="ref-card"><div class="ref-label">Stop Reference</div><div class="ref-value">${Number(stopPrice).toFixed(2)}</div></div>`;
+              if (targetPrice != null) html += `<div class="ref-card"><div class="ref-label">Target Reference</div><div class="ref-value">${Number(targetPrice).toFixed(2)}</div></div>`;
+              html += '</div>';
+            }
+
+            vizEl.innerHTML = html;
           }
 
           function plotTechnicalCharts(section, vizEl) {
