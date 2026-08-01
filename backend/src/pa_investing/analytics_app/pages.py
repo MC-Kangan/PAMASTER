@@ -1970,6 +1970,114 @@ def research_page() -> str:
             min-height: 32px;
             padding: 4px 8px;
           }
+          .tab-bar {
+            display: flex;
+            gap: 2px;
+            margin-bottom: 12px;
+            overflow-x: auto;
+            border-bottom: 1px solid #dbe4f0;
+          }
+          .tab-btn {
+            border: 0;
+            background: transparent;
+            color: #64748b;
+            padding: 8px 14px;
+            font: inherit;
+            font-size: 13px;
+            font-weight: 650;
+            cursor: pointer;
+            border-bottom: 3px solid transparent;
+            white-space: nowrap;
+          }
+          .tab-btn.active {
+            color: #1d4ed8;
+            border-bottom-color: #2563eb;
+          }
+          .tab-panel {
+            display: none;
+          }
+          .tab-panel.active {
+            display: block;
+          }
+          .report-header {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 12px;
+            flex-wrap: wrap;
+          }
+          .report-grid {
+            display: grid;
+            grid-template-columns: minmax(0, 1fr);
+            gap: 14px;
+          }
+          @media (min-width: 900px) {
+            .report-grid {
+              grid-template-columns: minmax(0, 1.1fr) minmax(320px, 0.9fr);
+            }
+          }
+          .narrative .section {
+            margin-bottom: 14px;
+          }
+          .narrative .section h3 {
+            font-size: 14px;
+            color: #1e293b;
+            margin: 0 0 4px;
+          }
+          .narrative .section p {
+            font-size: 13px;
+            color: #475569;
+            line-height: 1.5;
+            margin: 0;
+          }
+          .visuals .chart-box {
+            border: 1px solid #e2e8f0;
+            border-radius: 8px;
+            padding: 8px;
+            margin-bottom: 10px;
+          }
+          .ref-cards {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+            gap: 8px;
+          }
+          .ref-card {
+            border: 1px solid #dbe4f0;
+            border-radius: 8px;
+            padding: 10px;
+            text-align: center;
+          }
+          .ref-card .ref-label {
+            font-size: 11px;
+            color: #64748b;
+            margin-bottom: 4px;
+          }
+          .ref-card .ref-value {
+            font-size: 18px;
+            font-weight: 680;
+            font-variant-numeric: tabular-nums;
+          }
+          .signal-chip {
+            display: inline-flex;
+            border-radius: 999px;
+            padding: 4px 10px;
+            font-size: 12px;
+            font-weight: 650;
+          }
+          .signal-chip.bullish { background: #dcfce7; color: #166534; }
+          .signal-chip.bearish { background: #fee2e2; color: #991b1b; }
+          .signal-chip.neutral { background: #f1f5f9; color: #475569; }
+          .signal-chip.not_assessed { background: #fef3c7; color: #92400e; }
+          .status-badge {
+            display: inline-flex;
+            border-radius: 999px;
+            padding: 4px 10px;
+            font-size: 12px;
+            font-weight: 650;
+          }
+          .status-badge.complete { background: #e0e7ff; color: #3730a3; }
+          .status-badge.partial { background: #fef3c7; color: #92400e; }
+          .status-badge.failed { background: #fee2e2; color: #991b1b; }
           @media (min-width: 820px) {
             main { padding: 24px 16px 48px; }
             .layout { grid-template-columns: 360px minmax(0, 1fr); align-items: start; }
@@ -2029,6 +2137,8 @@ def research_page() -> str:
             positions: [],
             selected: null,
             skills: [],
+            results: [],
+            activeTab: 0,
           };
 
           function byId(id) { return document.getElementById(id); }
@@ -2179,27 +2289,146 @@ def research_page() -> str:
             setStatus('Ready.');
           }
 
-          function renderReport(result) {
-            if (result.status === 'failed') {
-              return `<article class="result"><h2>${result.skill}</h2>` +
-                `<div class="status warning">${result.detail || 'Skill failed.'}</div></article>`;
-            }
-            const report = result.report || {};
-            const rows = [];
+          const ENTRY_CLASS_LABELS = {
+            0: "Trend Broken",
+            1: "Overextended",
+            2: "Pullback Without Trigger",
+            3: "Trend Continuation",
+            4: "Pullback Reversal",
+            5: "Recovery Reversal",
+          };
+
+          const REGIME_LABELS = {
+            0: "Bear",
+            1: "Sideways",
+            2: "Bull",
+          };
+
+          function findObs(report, metric) {
             for (const section of report.results || []) {
-              for (const observation of section.observations || []) {
-                rows.push(`<tr><td>${section.analyst}</td><td>${observation.metric}</td>` +
-                  `<td>${JSON.stringify(observation.value)}</td><td>${observation.source}</td></tr>`);
+              for (const obs of section.observations || []) {
+                if (obs.metric === metric) return obs.value;
               }
             }
-            return `<article class="result"><h2>${result.skill}</h2>` +
-              `<span class="badge">complete</span>` +
+            return null;
+          }
+
+          function signalChip(signal) {
+            const cls = signal || 'not_assessed';
+            return `<span class="signal-chip ${cls}">${cls.replace('_', ' ')}</span>`;
+          }
+
+          function statusBadge(status) {
+            return `<span class="status-badge ${status}">${status}</span>`;
+          }
+
+          // -- Generic / fallback renderer --
+          function renderGenericReport(report, result) {
+            const rows = [];
+            for (const section of report.results || []) {
+              for (const obs of section.observations || []) {
+                rows.push(`<tr><td>${section.analyst}</td><td>${obs.metric}</td>` +
+                  `<td>${JSON.stringify(obs.value)}</td><td>${obs.source}</td></tr>`);
+              }
+            }
+            return `<div class="narrative">` +
+              `<div class="section"><h3>Summary</h3><p>${result.signal || 'not_assessed'} signal, ` +
+              `${result.status || 'unknown'} status. ${result.summary || ''}</p></div>` +
               (rows.length ? `<table><thead><tr><th>Skill</th><th>Metric</th><th>Value</th>` +
                 `<th>Source</th></tr></thead><tbody>${rows.join('')}</tbody></table>` :
                 '<div class="status">No numeric observations returned.</div>') +
-              `<details><summary>Raw JSON</summary><pre>` +
-              `${JSON.stringify(report, null, 2)}</pre></details>` +
-              `</article>`;
+              `</div>`;
+          }
+
+          const REPORT_TEMPLATES = {
+            "technical": null,       // filled in Task 13
+            "worth-buy-stocks": null, // filled in Task 14
+            "markov-method": null,    // filled in Task 15
+            "_fallback": renderGenericReport,
+          };
+
+          function renderReport(result) {
+            // Returns HTML for one tab panel
+            if (result.status === 'failed') {
+              return `<div class="report-header">` +
+                `<strong>${result.skill}</strong>` +
+                `<span class="status-badge failed">failed</span></div>` +
+                `<div class="status warning">${result.detail || 'Skill failed.'}</div>`;
+            }
+            const report = result.report || {};
+            const section = (report.results || [])[0] || {};
+            const analyst = section.analyst || result.skill;
+            const renderer = REPORT_TEMPLATES[analyst] || REPORT_TEMPLATES["_fallback"];
+
+            const narrativeHtml = renderer(report, section);
+            const signal = section.signal || 'not_assessed';
+            const status = section.status || 'unknown';
+
+            return `<div class="report-header">` +
+              `<strong>${analyst}</strong>` +
+              statusBadge(status) +
+              signalChip(signal) +
+              `</div>` +
+              `<div class="report-grid">` +
+              `<div class="narrative">${narrativeHtml}</div>` +
+              `<div class="visuals" id="viz-${analyst}"></div>` +
+              `</div>` +
+              `<details style="margin-top:12px"><summary>Raw JSON</summary>` +
+              `<pre>${JSON.stringify(report, null, 2)}</pre></details>`;
+          }
+
+          function renderChartsForTab(tabIndex) {
+            const result = state.results[tabIndex];
+            if (!result || result.status !== 'complete') return;
+            const report = result.report || {};
+            const section = (report.results || [])[0];
+            if (!section) return;
+            const analyst = section.analyst || result.skill;
+            const vizEl = byId(`viz-${analyst}`);
+            if (!vizEl) return;
+            // Each template fills this in its own plot function
+            const plotFns = {
+              "technical": plotTechnicalCharts,
+              "worth-buy-stocks": plotWorthBuyCharts,
+              "markov-method": plotMarkovCharts,
+            };
+            const plotFn = plotFns[analyst];
+            if (plotFn) plotFn(section, vizEl);
+          }
+
+          function renderTabs(results) {
+            if (!results.length) {
+              byId('results').innerHTML = '<div class="status">No results.</div>';
+              return;
+            }
+            state.results = results;
+            state.activeTab = 0;
+            const tabs = results.map((r, i) => {
+              const section = (r.report && r.report.results ? r.report.results[0] : null);
+              const label = (section && section.analyst) || r.skill;
+              return `<button class="tab-btn${i === 0 ? ' active' : ''}" data-tab="${i}">${label}</button>`;
+            }).join('');
+            const panels = results.map((r, i) =>
+              `<div class="tab-panel${i === 0 ? ' active' : ''}" data-panel="${i}">${renderReport(r)}</div>`
+            ).join('');
+            byId('results').innerHTML =
+              `<div class="tab-bar">${tabs}</div>` +
+              `<div class="tab-panels">${panels}</div>`;
+
+            // Wire tab clicks
+            byId('results').querySelectorAll('.tab-btn').forEach(btn => {
+              btn.addEventListener('click', function () {
+                const idx = parseInt(this.dataset.tab);
+                state.activeTab = idx;
+                byId('results').querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+                this.classList.add('active');
+                byId('results').querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+                byId('results').querySelector(`[data-panel="${idx}"]`).classList.add('active');
+              });
+            });
+
+            // Trigger chart rendering for active tab
+            renderChartsForTab(0);
           }
 
           async function runResearch() {
@@ -2247,7 +2476,7 @@ def research_page() -> str:
               if (!response.ok) {
                 throw new Error(payload.detail || `Run failed (${response.status})`);
               }
-              byId('results').innerHTML = payload.results.map(renderReport).join('');
+              renderTabs(payload.results);
               setStatus('Research complete.');
             } catch (error) {
               byId('results').innerHTML = `<div class="status warning">${error.message}</div>`;
