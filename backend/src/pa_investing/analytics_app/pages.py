@@ -2851,6 +2851,10 @@ def research_page() -> str:
                 this.classList.add('active');
                 byId('results').querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
                 byId('results').querySelector(`[data-panel="${idx}"]`).classList.add('active');
+                if (!btn.dataset.rendered) {
+                  renderChartsForTab(idx);
+                  btn.dataset.rendered = '1';
+                }
               });
             });
 

@@ -1554,12 +1554,18 @@ class TestResearchSkillsWithParameters:
         assert skills["technical"]["parameters"]["properties"]["window"]["default"] == 20
         assert skills["fundamental"]["parameters"] is None
 
-    def test_research_skills_disabled_no_parameters(self, client: TestClient) -> None:
+    def test_research_skills_disabled_no_parameters(self) -> None:
         """When TradeAgent is disabled, parameters should not appear."""
+        app = create_app()
+        app.dependency_overrides[get_settings] = lambda: Settings(
+            analytics_auth_enabled=False,
+        )
+        app.dependency_overrides[get_trade_agent_client] = lambda: DisabledTradeAgentClient()
+        client = TestClient(app)
         response = client.get("/analysis/research/skills")
         payload = response.json()
-        if payload["status"] == "disabled":
-            assert "parameters" not in payload or not payload.get("skills")
+        assert payload["status"] == "disabled"
+        assert "parameters" not in payload or not payload.get("skills")
 
 
 class TestResearchRunWithParameters:
