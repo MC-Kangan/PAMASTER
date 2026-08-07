@@ -1682,6 +1682,23 @@ class TestResearchPageContent:
         assert "REPORT_TEMPLATES" in html
         assert "ENTRY_CLASS_LABELS" in html
         assert "REGIME_LABELS" in html
+        assert "worth-buy-stocks-v1" in html
+        assert "chart-wb-price" in html
+        assert "Price Structure and Model Reference Levels" in html
+        assert "Risk Controls" in html
+        assert "Technical Confirmation" in html
+
+    def test_research_page_renders_tradeagent_presentation_contract(
+        self, client: TestClient
+    ) -> None:
+        response = client.get("/analysis/research")
+        html = response.text
+
+        assert "section.presentation" in html
+        assert "presentation.price_bars" in html
+        assert "presentation.score_components" in html
+        assert "presentation.reference_levels" in html
+        assert "News/event risk, fundamental valuation and AI opinion" in html
 
     def test_research_page_includes_skill_parameters_js(self, client: TestClient) -> None:
         """Research page must include JS for collecting skill parameters."""

@@ -1,3 +1,10 @@
+"""Server-rendered analytics pages with embedded browser assets."""
+
+# The research page intentionally embeds readable HTML, CSS, and JavaScript in
+# one template; wrapping those assets to Python's line limit makes the browser
+# code harder to maintain.
+# ruff: noqa: E501
+
 import json
 from html import escape
 
@@ -2003,26 +2010,41 @@ def research_page() -> str:
             display: flex;
             align-items: center;
             gap: 8px;
-            margin-bottom: 12px;
+            margin-bottom: 14px;
             flex-wrap: wrap;
+          }
+          .report-header strong {
+            font-size: 18px;
+            letter-spacing: 0;
           }
           .report-grid {
             display: grid;
             grid-template-columns: minmax(0, 1fr);
-            gap: 14px;
+            gap: 18px;
+          }
+          .report-grid.worth-buy-layout {
+            grid-template-columns: minmax(0, 1fr);
           }
           @media (min-width: 900px) {
             .report-grid {
-              grid-template-columns: minmax(0, 1.1fr) minmax(320px, 0.9fr);
+              grid-template-columns: minmax(320px, 0.95fr) minmax(360px, 1.05fr);
             }
           }
+          .narrative {
+            display: grid;
+            gap: 10px;
+            align-content: start;
+          }
           .narrative .section {
-            margin-bottom: 14px;
+            border: 1px solid #e2e8f0;
+            border-radius: 8px;
+            padding: 10px 12px;
+            background: #ffffff;
           }
           .narrative .section h3 {
             font-size: 14px;
             color: #1e293b;
-            margin: 0 0 4px;
+            margin: 0 0 5px;
           }
           .narrative .section p {
             font-size: 13px;
@@ -2030,11 +2052,33 @@ def research_page() -> str:
             line-height: 1.5;
             margin: 0;
           }
+          .visuals {
+            display: grid;
+            gap: 10px;
+            align-content: start;
+            min-width: 0;
+          }
           .visuals .chart-box {
             border: 1px solid #e2e8f0;
             border-radius: 8px;
-            padding: 8px;
-            margin-bottom: 10px;
+            background: #ffffff;
+            min-height: 176px;
+            overflow: hidden;
+            position: relative;
+          }
+          .visuals .chart-box.compact {
+            min-height: 132px;
+          }
+          .visuals .chart-box.tall {
+            min-height: 220px;
+          }
+          .visuals .chart-box.market-chart {
+            min-height: 390px;
+          }
+          .visuals .chart-box .js-plotly-plot,
+          .visuals .chart-box .plot-container,
+          .visuals .chart-box .svg-container {
+            width: 100% !important;
           }
           .ref-cards {
             display: grid;
@@ -2046,6 +2090,7 @@ def research_page() -> str:
             border-radius: 8px;
             padding: 10px;
             text-align: center;
+            background: #f8fafc;
           }
           .ref-card .ref-label {
             font-size: 11px;
@@ -2078,6 +2123,61 @@ def research_page() -> str:
           .status-badge.complete { background: #e0e7ff; color: #3730a3; }
           .status-badge.partial { background: #fef3c7; color: #92400e; }
           .status-badge.failed { background: #fee2e2; color: #991b1b; }
+          .worth-summary {
+            display: grid;
+            grid-template-columns: minmax(0, 1fr);
+            gap: 12px;
+            padding: 14px;
+            border-left: 4px solid #64748b;
+            background: #f8fafc;
+          }
+          .worth-summary.bullish { border-left-color: #16a34a; background: #f0fdf4; }
+          .worth-summary.bearish { border-left-color: #dc2626; background: #fef2f2; }
+          .worth-summary.neutral { border-left-color: #d97706; background: #fffbeb; }
+          .worth-summary h3 { margin: 0 0 4px; font-size: 18px; }
+          .worth-summary p { margin: 0; color: #475569; font-size: 13px; line-height: 1.5; }
+          .worth-kpis {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 8px;
+          }
+          .worth-kpi { padding: 8px 0; border-top: 1px solid #dbe4f0; }
+          .worth-kpi span { display: block; color: #64748b; font-size: 11px; }
+          .worth-kpi strong { display: block; margin-top: 2px; font-size: 16px; }
+          .report-section { margin-top: 18px; }
+          .report-section h3 { margin: 0 0 8px; font-size: 15px; }
+          .report-table th { color: #64748b; font-size: 11px; text-transform: uppercase; }
+          .report-table td { font-size: 12px; }
+          .check-state {
+            display: inline-flex;
+            min-width: 76px;
+            justify-content: center;
+            padding: 3px 7px;
+            border-radius: 4px;
+            font-size: 11px;
+            font-weight: 700;
+          }
+          .check-state.pass { background: #dcfce7; color: #166534; }
+          .check-state.warning { background: #fef3c7; color: #92400e; }
+          .check-state.fail { background: #fee2e2; color: #991b1b; }
+          .check-state.unavailable { background: #f1f5f9; color: #64748b; }
+          .benchmark-list { display: flex; flex-wrap: wrap; gap: 6px; }
+          .benchmark-item {
+            display: inline-flex;
+            gap: 5px;
+            align-items: center;
+            border: 1px solid #dbe4f0;
+            padding: 5px 8px;
+            font-size: 12px;
+            background: #fff;
+          }
+          .benchmark-dot { width: 7px; height: 7px; border-radius: 50%; background: #94a3b8; }
+          .benchmark-item.available .benchmark-dot { background: #16a34a; }
+          .coverage-note { color: #64748b; font-size: 12px; line-height: 1.45; }
+          @media (min-width: 620px) {
+            .worth-summary { grid-template-columns: minmax(0, 1.5fr) minmax(260px, 1fr); }
+            .worth-kpis { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+          }
           @media (min-width: 820px) {
             main { padding: 24px 16px 48px; }
             .layout { grid-template-columns: 360px minmax(0, 1fr); align-items: start; }
@@ -2139,9 +2239,16 @@ def research_page() -> str:
             skills: [],
             results: [],
             activeTab: 0,
+            lastRun: null,
           };
 
           function byId(id) { return document.getElementById(id); }
+
+          function escapeReport(value) {
+            return String(value == null ? '' : value).replace(/[&<>"']/g, char => ({
+              '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+            })[char]);
+          }
 
           function number2(value) {
             if (value === null || value === undefined || value === '') return '--';
@@ -2302,6 +2409,42 @@ def research_page() -> str:
             5: "Recovery Reversal",
           };
 
+          const ENTRY_CLASS_CODE_LABELS = {
+            trend_broken: 'Trend Broken',
+            overextended: 'Overextended',
+            pullback_no_trigger: 'Pullback Without Trigger',
+            trend_continuation: 'Trend Continuation',
+            pullback_reversal: 'Pullback Reversal',
+            recovery_reversal: 'Recovery Reversal',
+            unknown: 'Unavailable',
+          };
+
+          const WORTH_VERDICT_LABELS = {
+            buy: 'Worth Further Consideration',
+            watch: 'Watch for Confirmation',
+            avoid: 'Avoid New Entry',
+            reduce_risk: 'Review Existing Risk',
+            cannot_score: 'Insufficient Data',
+          };
+
+          const WORTH_CHECK_LABELS = {
+            trend_alignment: 'Daily trend alignment',
+            max_drawdown: 'Drawdown control',
+            weekly_structure: 'Weekly structure',
+            volatility: 'Volatility control',
+            macd: 'MACD confirmation',
+            rsi: 'RSI condition',
+            kdj: 'KDJ condition',
+            trend_strength: 'Trend strength',
+            volume_confirmation: 'Volume confirmation',
+          };
+
+          const SCORE_COMPONENT_LABELS = {
+            momentum: 'Momentum',
+            relative_strength: 'Relative strength',
+            trend_efficiency: 'Trend efficiency',
+          };
+
           const REGIME_LABELS = {
             0: "Bear",
             1: "Sideways",
@@ -2324,6 +2467,32 @@ def research_page() -> str:
 
           function statusBadge(status) {
             return `<span class="status-badge ${status}">${status}</span>`;
+          }
+
+          const PLOTLY_CONFIG = {
+            responsive: true,
+            displaylogo: false,
+            displayModeBar: false,
+          };
+
+          function plotLayout(height, extra = {}) {
+            return {
+              height,
+              autosize: true,
+              paper_bgcolor: '#ffffff',
+              plot_bgcolor: '#ffffff',
+              font: {family: 'Inter, system-ui, sans-serif', size: 11, color: '#475569'},
+              margin: {l: 88, r: 24, t: 34, b: 36},
+              ...extra,
+            };
+          }
+
+          function chartBox(id, className = '') {
+            return `<div class="chart-box ${className}" id="${id}"></div>`;
+          }
+
+          function renderEmptyChart(message) {
+            return `<div class="chart-box compact"><div class="status">${message}</div></div>`;
           }
 
           // -- Generic / fallback renderer --
@@ -2425,10 +2594,9 @@ def research_page() -> str:
             const entryPrice = findObs(report, 'worth_buy_entry_price');
             const stopPrice = findObs(report, 'worth_buy_stop_price');
             const targetPrice = findObs(report, 'worth_buy_target_price');
-            const verdict = findObs(report, 'worth_buy_verdict');
-            const rsSPY = findObs(report, 'worth_buy_relative_strength');
             const missing = section.missing_metrics || [];
             const limitations = section.limitations || [];
+            const presentation = section.presentation;
 
             function setupQuality() {
               const signal = section.signal || 'not_assessed';
@@ -2476,13 +2644,70 @@ def research_page() -> str:
               return 'Model reference levels (not order instructions): ' + parts.join('; ') + '.';
             }
 
-            return `<div class="section"><h3>Setup Quality</h3><p>${setupQuality()}</p></div>` +
-              `<div class="section"><h3>Composite Score</h3><p>${compositeText()}</p></div>` +
-              `<div class="section"><h3>Risk Veto</h3><p>${riskText()}</p></div>` +
-              `<div class="section"><h3>Entry Class</h3><p>${entryText()}</p></div>` +
-              `<div class="section"><h3>Reference Levels</h3><p>${refLevelsText()}</p></div>` +
-              (missing.length ? `<div class="section"><h3>Data Quality</h3><p>Missing: ${missing.join(', ')}. ` +
-                (limitations.length ? `Limitations: ${limitations.join(', ')}.` : '') + `</p></div>` : '');
+            if (!presentation || presentation.template !== 'worth-buy-stocks-v1') {
+              return `<div class="section"><h3>Setup Quality</h3><p>${setupQuality()}</p></div>` +
+                `<div class="section"><h3>Composite Score</h3><p>${compositeText()}</p></div>` +
+                `<div class="section"><h3>Risk Veto</h3><p>${riskText()}</p></div>` +
+                `<div class="section"><h3>Entry Class</h3><p>${entryText()}</p></div>` +
+                `<div class="section"><h3>Reference Levels</h3><p>${refLevelsText()}</p></div>` +
+                `<div class="status">Restart TradeAgent to load the richer evidence and price-chart payload.</div>`;
+            }
+
+            function checkValue(check) {
+              if (check.value == null) return '—';
+              const value = Number(check.value);
+              if (check.key === 'max_drawdown') return `${value.toFixed(1)}%`;
+              if (check.key === 'weekly_structure') return value > 0 ? 'Bearish' : 'Constructive';
+              if (check.key === 'rsi' || check.key === 'kdj' || check.key === 'trend_strength') {
+                return value.toFixed(1);
+              }
+              return value.toFixed(2);
+            }
+
+            function checkTable(title, checks) {
+              const rows = (checks || []).map(check =>
+                `<tr><td>${escapeReport(WORTH_CHECK_LABELS[check.key] || check.key)}</td>` +
+                `<td><span class="check-state ${check.status}">${escapeReport(check.status)}</span></td>` +
+                `<td>${checkValue(check)}</td></tr>`
+              ).join('');
+              return `<section class="report-section"><h3>${title}</h3>` +
+                `<table class="report-table"><thead><tr><th>Check</th><th>Status</th><th>Value</th></tr></thead>` +
+                `<tbody>${rows || '<tr><td colspan="3">No checks returned.</td></tr>'}</tbody></table></section>`;
+            }
+
+            const verdictCode = presentation.verdict || 'cannot_score';
+            const verdictLabel = WORTH_VERDICT_LABELS[verdictCode] || 'Insufficient Data';
+            const entryLabel = ENTRY_CLASS_CODE_LABELS[presentation.entry_class] || 'Unavailable';
+            const benchmarks = (presentation.benchmarks || []).map(item =>
+              `<span class="benchmark-item ${item.available ? 'available' : ''}">` +
+              `<span class="benchmark-dot"></span>${escapeReport(item.label)} · ` +
+              `${escapeReport(item.instrument ? item.instrument.symbol : '')}` +
+              `${item.available ? '' : ' · unavailable'}</span>`
+            ).join('');
+            const heldPosition = state.lastRun && state.lastRun.position;
+            const positionLabel = heldPosition
+              ? `${number2(heldPosition.quantity)} shares held · average cost ${number2(heldPosition.average_cost)}`
+              : 'No current position in the selected PAMASTER account.';
+            const quality = composite == null ? '—' : `${Number(composite).toFixed(1)} / 100`;
+            const risk = riskVeto == null ? '—' : `${Number(riskVeto).toFixed(1)} / 100`;
+
+            return `<div class="worth-summary ${section.signal || 'neutral'}">` +
+              `<div><h3>${escapeReport(verdictLabel)}</h3><p>${setupQuality()}</p>` +
+              `<p style="margin-top:6px">${escapeReport(positionLabel)}</p></div>` +
+              `<div class="worth-kpis">` +
+              `<div class="worth-kpi"><span>Composite</span><strong>${quality}</strong></div>` +
+              `<div class="worth-kpi"><span>Risk veto</span><strong>${risk}</strong></div>` +
+              `<div class="worth-kpi"><span>Entry setup</span><strong>${escapeReport(entryLabel)}</strong></div>` +
+              `</div></div>` +
+              checkTable('Risk Controls', presentation.risk_checks) +
+              checkTable('Technical Confirmation', presentation.confirmation_checks) +
+              `<section class="report-section"><h3>Benchmark Coverage</h3>` +
+              `<div class="benchmark-list">${benchmarks || 'No benchmarks returned.'}</div></section>` +
+              `<section class="report-section"><h3>Research Coverage</h3>` +
+              `<p class="coverage-note">This deterministic report uses price, volume, trend and benchmark data. ` +
+              `News/event risk, fundamental valuation and AI opinion are not calculated by this skill. ` +
+              `${missing.length ? `Missing metrics: ${escapeReport(missing.join(', '))}. ` : ''}` +
+              `${limitations.length ? `Limitations: ${escapeReport(limitations.join(', '))}.` : ''}</p></section>`;
           }
 
           function renderMarkovReport(report, section) {
@@ -2569,16 +2794,17 @@ def research_page() -> str:
             const narrativeHtml = renderer(report, section);
             const signal = section.signal || 'not_assessed';
             const status = section.status || 'unknown';
+            const isWorthBuy = analyst === 'worth-buy-stocks';
+            const reportBody = isWorthBuy
+              ? `<div class="visuals" id="viz-${analyst}"></div><div class="narrative">${narrativeHtml}</div>`
+              : `<div class="narrative">${narrativeHtml}</div><div class="visuals" id="viz-${analyst}"></div>`;
 
             return `<div class="report-header">` +
               `<strong>${analyst}</strong>` +
               statusBadge(status) +
               signalChip(signal) +
               `</div>` +
-              `<div class="report-grid">` +
-              `<div class="narrative">${narrativeHtml}</div>` +
-              `<div class="visuals" id="viz-${analyst}"></div>` +
-              `</div>` +
+              `<div class="report-grid${isWorthBuy ? ' worth-buy-layout' : ''}">${reportBody}</div>` +
               `<details style="margin-top:12px"><summary>Raw JSON</summary>` +
               `<pre>${JSON.stringify(report, null, 2)}</pre></details>`;
           }
@@ -2612,82 +2838,79 @@ def research_page() -> str:
             const signal = findObs({results: [section]}, 'markov_signal');
 
             let html = '';
-
-            // Stationary probability bar chart
             if (bullProb != null && bearProb != null && sidewaysProb != null) {
-              html += '<div class="chart-box" id="chart-markov-stationary"></div>';
-              setTimeout(() => {
-                const trace = {
-                  type: 'bar',
-                  x: [Number(bullProb) * 100, Number(sidewaysProb) * 100, Number(bearProb) * 100],
-                  y: ['Bull', 'Sideways', 'Bear'],
-                  orientation: 'h',
-                  marker: {color: ['#22c55e', '#f59e0b', '#ef4444']},
-                  text: [Number(bullProb) * 100, Number(sidewaysProb) * 100, Number(bearProb) * 100]
-                    .map(v => v.toFixed(1) + '%'),
-                  textposition: 'outside',
-                };
-                Plotly.newPlot('chart-markov-stationary', [trace], {
-                  margin: {l: 80, r: 60, t: 10, b: 10},
-                  height: 150,
-                  title: 'Stationary Probabilities',
-                  xaxis: {range: [0, 100], ticksuffix: '%'},
-                }, {responsive: true, displaylogo: false,
-                  modeBarButtonsToRemove: ['select2d', 'lasso2d']});
-              }, 50);
+              html += chartBox('chart-markov-stationary');
             }
-
-            // Persistence bars
             if (persBull != null && persSideways != null && persBear != null) {
-              html += '<div class="chart-box" id="chart-markov-persistence"></div>';
-              setTimeout(() => {
+              html += chartBox('chart-markov-persistence');
+            }
+            if (signal != null) {
+              html += chartBox('chart-markov-signal', 'compact');
+            }
+            vizEl.innerHTML = html || renderEmptyChart('No chartable Markov metrics returned.');
+
+            requestAnimationFrame(() => {
+              if (bullProb != null && bearProb != null && sidewaysProb != null) {
                 const trace = {
                   type: 'bar',
-                  x: [Number(persBull), Number(persSideways), Number(persBear)],
-                  y: ['Bull Persistence', 'Sideways Persistence', 'Bear Persistence'],
+                  x: [Number(bearProb) * 100, Number(sidewaysProb) * 100, Number(bullProb) * 100],
+                  y: ['Bear', 'Sideways', 'Bull'],
                   orientation: 'h',
-                  marker: {color: ['#22c55e', '#f59e0b', '#ef4444']},
-                  text: [Number(persBull), Number(persSideways), Number(persBear)]
-                    .map(v => v.toFixed(2)),
-                  textposition: 'outside',
+                  marker: {color: ['#ef4444', '#f59e0b', '#22c55e']},
+                  text: [Number(bearProb) * 100, Number(sidewaysProb) * 100, Number(bullProb) * 100]
+                    .map(v => v.toFixed(1) + '%'),
+                  textposition: 'inside',
+                  insidetextanchor: 'middle',
+                  hovertemplate: '%{y}: %{x:.1f}%<extra></extra>',
                 };
-                Plotly.newPlot('chart-markov-persistence', [trace], {
-                  margin: {l: 140, r: 60, t: 10, b: 10},
-                  height: 150,
-                  title: 'Persistence',
-                }, {responsive: true, displaylogo: false,
-                  modeBarButtonsToRemove: ['select2d', 'lasso2d']});
-              }, 50);
-            }
+                Plotly.newPlot('chart-markov-stationary', [trace], plotLayout(176, {
+                  title: {text: 'Stationary Probabilities', x: 0.02, xanchor: 'left'},
+                  margin: {l: 82, r: 18, t: 34, b: 32},
+                  xaxis: {range: [0, 100], ticksuffix: '%', fixedrange: true, gridcolor: '#e2e8f0'},
+                  yaxis: {fixedrange: true, automargin: true},
+                }), PLOTLY_CONFIG);
+              }
 
-            // Signal gauge
-            if (signal != null) {
-              html += '<div class="chart-box" id="chart-markov-signal"></div>';
-              setTimeout(() => {
+              if (persBull != null && persSideways != null && persBear != null) {
+                const trace = {
+                  type: 'bar',
+                  x: [Number(persBear), Number(persSideways), Number(persBull)],
+                  y: ['Bear Persistence', 'Sideways Persistence', 'Bull Persistence'],
+                  orientation: 'h',
+                  marker: {color: ['#ef4444', '#f59e0b', '#22c55e']},
+                  text: [Number(persBear), Number(persSideways), Number(persBull)]
+                    .map(v => v.toFixed(2)),
+                  textposition: 'inside',
+                  hovertemplate: '%{y}: %{x:.2f}<extra></extra>',
+                };
+                Plotly.newPlot('chart-markov-persistence', [trace], plotLayout(176, {
+                  title: {text: 'Persistence', x: 0.02, xanchor: 'left'},
+                  margin: {l: 132, r: 18, t: 34, b: 32},
+                  xaxis: {range: [0, 1], fixedrange: true, gridcolor: '#e2e8f0'},
+                  yaxis: {fixedrange: true, automargin: true},
+                }), PLOTLY_CONFIG);
+              }
+
+              if (signal != null) {
                 const s = Number(signal);
                 const trace = {
-                  type: 'indicator',
-                  mode: 'gauge+number+delta',
-                  value: s,
-                  title: {text: 'Directional Bias'},
-                  gauge: {
-                    axis: {range: [-1, 1]},
-                    bar: {color: s > 0 ? '#22c55e' : '#ef4444'},
-                    steps: [
-                      {range: [-1, -0.05], color: '#fee2e2'},
-                      {range: [-0.05, 0.05], color: '#f1f5f9'},
-                      {range: [0.05, 1], color: '#dcfce7'},
-                    ],
-                  },
+                  type: 'bar',
+                  x: [s],
+                  y: ['Signal'],
+                  orientation: 'h',
+                  marker: {color: s > 0.05 ? '#22c55e' : s < -0.05 ? '#ef4444' : '#94a3b8'},
+                  text: [s.toFixed(3)],
+                  textposition: 'inside',
+                  hovertemplate: 'Signal: %{x:.3f}<extra></extra>',
                 };
-                Plotly.newPlot('chart-markov-signal', [trace], {margin: {t: 30, b: 10}}, {
-                  responsive: true, displaylogo: false,
-                  modeBarButtonsToRemove: ['select2d', 'lasso2d'],
-                });
-              }, 50);
-            }
-
-            vizEl.innerHTML = html;
+                Plotly.newPlot('chart-markov-signal', [trace], plotLayout(132, {
+                  title: {text: 'Directional Bias', x: 0.02, xanchor: 'left'},
+                  margin: {l: 64, r: 18, t: 34, b: 28},
+                  xaxis: {range: [-1, 1], zeroline: true, fixedrange: true, gridcolor: '#e2e8f0'},
+                  yaxis: {fixedrange: true},
+                }), PLOTLY_CONFIG);
+              }
+            });
           }
 
           function plotWorthBuyCharts(section, vizEl) {
@@ -2696,68 +2919,86 @@ def research_page() -> str:
             const entryPrice = findObs({results: [section]}, 'worth_buy_entry_price');
             const stopPrice = findObs({results: [section]}, 'worth_buy_stop_price');
             const targetPrice = findObs({results: [section]}, 'worth_buy_target_price');
+            const presentation = section.presentation || {};
+            const bars = presentation.price_bars || [];
+            const components = presentation.score_components || [];
+            const levels = presentation.reference_levels || {
+              entry: entryPrice, stop: stopPrice, target: targetPrice,
+            };
 
             let html = '';
-
-            // Composite gauge
-            if (composite != null) {
-              html += '<div class="chart-box" id="chart-wb-gauge"></div>';
-              setTimeout(() => {
-                const trace = {
-                  type: 'indicator',
-                  mode: 'gauge+number',
-                  value: Number(composite),
-                  title: {text: 'Composite Score'},
-                  gauge: {
-                    axis: {range: [0, 100]},
-                    bar: {color: '#2563eb'},
-                    steps: [
-                      {range: [0, 30], color: '#fee2e2'},
-                      {range: [30, 70], color: '#fef3c7'},
-                      {range: [70, 100], color: '#dcfce7'},
-                    ],
-                  },
-                };
-                Plotly.newPlot('chart-wb-gauge', [trace], {margin: {t: 30, b: 10}}, {
-                  responsive: true, displaylogo: false,
-                  modeBarButtonsToRemove: ['select2d', 'lasso2d'],
-                });
-              }, 50);
+            if (bars.length) {
+              html += chartBox('chart-wb-price', 'market-chart');
             }
-
-            // Risk veto bar
-            if (riskVeto != null) {
-              html += '<div class="chart-box" id="chart-wb-risk"></div>';
-              setTimeout(() => {
-                const rv = Number(riskVeto);
-                const trace = {
-                  type: 'bar',
-                  x: [rv],
-                  y: ['Risk Veto'],
-                  orientation: 'h',
-                  marker: {color: rv > 15 ? '#ef4444' : rv > 5 ? '#f59e0b' : '#22c55e'},
-                  text: [rv.toFixed(1)],
-                  textposition: 'outside',
-                };
-                Plotly.newPlot('chart-wb-risk', [trace], {
-                  margin: {l: 80, r: 50, t: 10, b: 10},
-                  height: 100,
-                  xaxis: {range: [0, Math.max(30, rv + 5)]},
-                }, {responsive: true, displaylogo: false,
-                  modeBarButtonsToRemove: ['select2d', 'lasso2d']});
-              }, 50);
+            if (components.length) {
+              html += chartBox('chart-wb-components', 'tall');
             }
-
-            // Reference level cards
-            if (entryPrice != null || stopPrice != null || targetPrice != null) {
+            if (levels.entry != null || levels.stop != null || levels.target != null) {
               html += '<div class="ref-cards">';
-              if (entryPrice != null) html += `<div class="ref-card"><div class="ref-label">Entry Reference</div><div class="ref-value">${Number(entryPrice).toFixed(2)}</div></div>`;
-              if (stopPrice != null) html += `<div class="ref-card"><div class="ref-label">Stop Reference</div><div class="ref-value">${Number(stopPrice).toFixed(2)}</div></div>`;
-              if (targetPrice != null) html += `<div class="ref-card"><div class="ref-label">Target Reference</div><div class="ref-value">${Number(targetPrice).toFixed(2)}</div></div>`;
+              if (levels.entry != null) html += `<div class="ref-card"><div class="ref-label">Entry Reference</div><div class="ref-value">${Number(levels.entry).toFixed(2)}</div></div>`;
+              if (levels.stop != null) html += `<div class="ref-card"><div class="ref-label">Stop Reference</div><div class="ref-value">${Number(levels.stop).toFixed(2)}</div></div>`;
+              if (levels.target != null) html += `<div class="ref-card"><div class="ref-label">Target Reference</div><div class="ref-value">${Number(levels.target).toFixed(2)}</div></div>`;
               html += '</div>';
             }
+            vizEl.innerHTML = html || renderEmptyChart('No chart data returned. Restart TradeAgent if it is still running an older build.');
 
-            vizEl.innerHTML = html;
+            requestAnimationFrame(() => {
+              if (bars.length) {
+                const x = bars.map(item => item.observed_at);
+                const candle = {
+                  type: 'candlestick', x,
+                  open: bars.map(item => item.open), high: bars.map(item => item.high),
+                  low: bars.map(item => item.low), close: bars.map(item => item.close),
+                  increasing: {line: {color: '#059669'}, fillcolor: '#10b981'},
+                  decreasing: {line: {color: '#dc2626'}, fillcolor: '#ef4444'},
+                  name: 'Price', xaxis: 'x', yaxis: 'y',
+                };
+                const volume = {
+                  type: 'bar', x, y: bars.map(item => item.volume),
+                  marker: {color: bars.map(item => item.close >= item.open ? '#86efac' : '#fca5a5')},
+                  name: 'Volume', xaxis: 'x', yaxis: 'y2', hovertemplate: 'Volume %{y:,.0f}<extra></extra>',
+                };
+                const levelShapes = [
+                  [levels.entry, '#2563eb', 'dash'],
+                  [levels.stop, '#dc2626', 'dot'],
+                  [levels.target, '#059669', 'dash'],
+                ].filter(item => item[0] != null).map(item => ({
+                  type: 'line', xref: 'paper', x0: 0, x1: 1, yref: 'y',
+                  y0: Number(item[0]), y1: Number(item[0]),
+                  line: {color: item[1], width: 1.5, dash: item[2]},
+                }));
+                Plotly.newPlot('chart-wb-price', [candle, volume], plotLayout(390, {
+                  title: {text: 'Price Structure and Model Reference Levels', x: 0.02, xanchor: 'left'},
+                  margin: {l: 58, r: 22, t: 42, b: 36},
+                  showlegend: false,
+                  xaxis: {rangeslider: {visible: false}, showgrid: false, fixedrange: true},
+                  yaxis: {domain: [0.27, 1], gridcolor: '#e2e8f0', fixedrange: true},
+                  yaxis2: {domain: [0, 0.18], gridcolor: '#f1f5f9', fixedrange: true},
+                  shapes: levelShapes,
+                }), PLOTLY_CONFIG);
+              }
+
+              if (components.length) {
+                const available = components.filter(item => item.score != null);
+                const trace = {
+                  type: 'bar',
+                  x: available.map(item => Number(item.score)),
+                  y: available.map(item => SCORE_COMPONENT_LABELS[item.key] || item.key),
+                  orientation: 'h',
+                  marker: {color: ['#2563eb', '#0d9488', '#d97706']},
+                  customdata: available.map(item => [Number(item.weight) * 100, Number(item.weighted_score)]),
+                  text: available.map(item => `${Number(item.score).toFixed(1)} · ${Number(item.weighted_score).toFixed(1)} pts`),
+                  textposition: 'inside',
+                  hovertemplate: '%{y}: %{x:.1f}/100<br>Weight: %{customdata[0]:.0f}%<br>Contribution: %{customdata[1]:.1f}<extra></extra>',
+                };
+                Plotly.newPlot('chart-wb-components', [trace], plotLayout(220, {
+                  title: {text: 'Evidence Scores and Weighted Contribution', x: 0.02, xanchor: 'left'},
+                  margin: {l: 122, r: 18, t: 42, b: 34},
+                  xaxis: {range: [0, 100], fixedrange: true, gridcolor: '#e2e8f0'},
+                  yaxis: {fixedrange: true, automargin: true},
+                }), PLOTLY_CONFIG);
+              }
+            });
           }
 
           function plotTechnicalCharts(section, vizEl) {
@@ -2790,7 +3031,10 @@ def research_page() -> str:
               }
             }
 
-            if (!labels.length) return;
+            if (!labels.length) {
+              vizEl.innerHTML = renderEmptyChart('No chartable technical metrics returned.');
+              return;
+            }
 
             const trace = {
               type: 'bar',
@@ -2799,22 +3043,27 @@ def research_page() -> str:
               orientation: 'h',
               marker: {color: colors},
               text: values.map(v => String(v)),
-              textposition: 'outside',
+              textposition: 'inside',
+              hovertemplate: '%{y}: %{x}<extra></extra>',
             };
 
+            const minValue = Math.min(0, ...values);
+            const maxValue = Math.max(0, ...values);
+            const padding = Math.max(1, (maxValue - minValue) * 0.12);
             const layout = {
-              margin: {l: 100, r: 50, t: 10, b: 10},
-              height: Math.max(160, labels.length * 40),
-              xaxis: {showgrid: true, zeroline: true},
-              yaxis: {automargin: true},
+              ...plotLayout(Math.max(190, labels.length * 42), {
+                title: {text: 'Technical Snapshot', x: 0.02, xanchor: 'left'},
+                margin: {l: 112, r: 18, t: 34, b: 34},
+                xaxis: {
+                  range: [minValue - padding, maxValue + padding],
+                  showgrid: true,
+                  zeroline: true,
+                  fixedrange: true,
+                  gridcolor: '#e2e8f0',
+                },
+                yaxis: {automargin: true, fixedrange: true},
+              }),
             };
-
-            vizEl.innerHTML = '<div class="chart-box" id="chart-technical"></div>';
-            Plotly.newPlot('chart-technical', [trace], layout, {
-              responsive: true,
-              displaylogo: false,
-              modeBarButtonsToRemove: ['select2d', 'lasso2d'],
-            });
 
             // Mini-cards for SMA, ATR
             const sma = findObs({results: [section]}, 'simple_moving_average_20') || findObs({results: [section]}, 'simple_moving_average');
@@ -2822,9 +3071,11 @@ def research_page() -> str:
             const cardsHtml = [];
             if (sma != null) cardsHtml.push(`<div class="ref-card"><div class="ref-label">SMA</div><div class="ref-value">${Number(sma).toFixed(2)}</div></div>`);
             if (atr != null) cardsHtml.push(`<div class="ref-card"><div class="ref-label">ATR</div><div class="ref-value">${Number(atr).toFixed(2)}</div></div>`);
-            if (cardsHtml.length) {
-              vizEl.innerHTML += `<div class="ref-cards">${cardsHtml.join('')}</div>`;
-            }
+            vizEl.innerHTML = chartBox('chart-technical', 'tall') +
+              (cardsHtml.length ? `<div class="ref-cards">${cardsHtml.join('')}</div>` : '');
+            requestAnimationFrame(() => {
+              Plotly.newPlot('chart-technical', [trace], layout, PLOTLY_CONFIG);
+            });
           }
 
           function renderTabs(results) {
@@ -2911,6 +3162,7 @@ def research_page() -> str:
               if (!response.ok) {
                 throw new Error(payload.detail || `Run failed (${response.status})`);
               }
+              state.lastRun = payload;
               renderTabs(payload.results);
               setStatus('Research complete.');
             } catch (error) {

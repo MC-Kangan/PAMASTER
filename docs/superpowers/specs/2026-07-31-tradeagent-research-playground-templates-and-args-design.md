@@ -37,7 +37,7 @@ class TechnicalSkillParameters(BaseModel):
 
 class WorthBuyStocksParameters(BaseModel):
     # Accepts comma-separated string (UI-friendly); validated into a tuple for the dataclass field.
-    benchmark_symbols: str = Field(default="SPY,QQQ", min_length=1)
+    benchmark_symbols: str = Field(default="AUTO", min_length=1)
 
     @field_validator("benchmark_symbols")
     @classmethod
@@ -262,9 +262,13 @@ Choose template by `result.analyst`; fall back to `_fallback` for unknown analys
 
 ### 3.3 Chart constraints
 
-- **Charts consume only scalar observations** (`report.results[].observations[]`).
-- No time series, no price fetching, no recalculation, no `chart_data` arrays.
-- Chart types: bar charts, gauge charts, probability bars, reference-level cards.
+- Charts consume sanitized TradeAgent report JSON only.
+- Scalar observation charts should use `report.results[].observations[]`.
+- Skills may optionally return a bounded `presentation` payload when the presentation needs richer
+  deterministic evidence such as price bars, score components, risk checks, or benchmark coverage.
+- The browser must not fetch prices, recalculate indicators, or infer missing metrics.
+- Plotly chart types should stay compact and audit-friendly: bars, bounded candlesticks, gauges,
+  probability bars, and reference-level cards.
 - Plotly 2.35.2 loaded from CDN (same version as Position Chart page).
 
 ### 3.4 Technical template
@@ -292,10 +296,15 @@ Choose template by `result.analyst`; fall back to `_fallback` for unknown analys
 5. **Reference Levels** — entry, stop, target with explicit disclaimer: "model reference levels, not order instructions."
 
 **Visuals (right column):**
-- **Composite gauge** — Plotly indicator/gauge showing composite score (0-100).
-- **Risk veto bar** — horizontal bar, red-scale, showing risk penalty.
-- **Reference level cards** — three compact cards: entry price, stop reference, target reference. Each shows the value with a label.
-- **Benchmark relative strength bars** — if `worth_buy_relative_strength` observations exist.
+- **Price structure chart** — bounded candlestick/volume chart from
+  `presentation.price_bars`, with entry/stop/target horizontal reference lines.
+- **Evidence score bars** — momentum, relative strength, and trend-efficiency scores from
+  `presentation.score_components`.
+- **Reference level cards** — three compact cards: entry price, stop reference, target reference.
+- **Benchmark coverage chips** — labels and resolved benchmark instruments from
+  `presentation.benchmarks`.
+- **Fallback** — if `presentation` is absent, use the older scalar composite/risk/reference
+  template and show a restart/upgrade hint.
 
 **Entry class translation table (JS):**
 ```javascript

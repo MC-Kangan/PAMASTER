@@ -9,7 +9,7 @@ def test_settings_defaults_are_safe_for_local_tests() -> None:
     assert settings.llm_provider == "mock"
     assert settings.database_url.startswith("sqlite+pysqlite://")
     assert settings.workflow_api_token == ""
-    assert settings.ibkr_flex_refresh_cooldown_seconds == 900
+    assert settings.ibkr_flex_refresh_cooldown_seconds == 300
     assert settings.trade_research_enabled is False
     assert settings.trade_research_base_url == "http://127.0.0.1:8002"
     assert settings.trade_research_api_token == ""

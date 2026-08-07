@@ -4,17 +4,18 @@ This is the canonical deployment path for running PA Investing on the UGREEN NAS
 source-code builds on the NAS.
 
 ```text
-build backend image on Mac
-→ save Docker image tar
-→ copy tar + LAN Compose file to NAS
-→ import image in UGREEN Docker
+build PAMASTER and TradeAgent images on Mac
+→ save Docker image tars
+→ copy tars + LAN Compose file to NAS
+→ import both images in UGREEN Docker
 → create/update Docker Project from Compose
 → run migrations
-→ open dashboard and use browser refresh buttons
+→ open dashboard / Research Playground and use browser refresh buttons
 ```
 
-The Docker image contains application code only. Do not put credentials inside the image. Keep
-IBKR, Notion, PostgreSQL, and dashboard credentials in the UGREEN Docker Project environment.
+The Docker images contain application code only. Do not put credentials inside either image. Keep
+IBKR, Notion, PostgreSQL, dashboard credentials, and the PAMASTER-to-TradeAgent bearer token in the
+UGREEN Docker Project environment.
 
 ## 0. Files and compose variant
 
@@ -34,35 +35,48 @@ ports:
 Do not set `PA_BIND_ADDRESS` for this path. That older variable belongs to loopback/private-proxy
 compose files and caused the previous “works inside container but not from Mac” confusion.
 
-## 1. Build the backend image on Mac
+## 1. Build the images on Mac
 
 Start Docker Desktop on the Mac first. Then run:
 
 ```bash
 cd /Users/chenkangan/Documents/PAMASTER/backend
 
-tag=$(git rev-parse --short HEAD)
-docker build --platform linux/amd64 -t "pa-investing-backend:${tag}" .
-docker save "pa-investing-backend:${tag}" -o "pa-investing-backend-${tag}.tar"
-echo "Built pa-investing-backend:${tag}"
+pa_tag=$(git rev-parse --short HEAD)
+docker build --platform linux/amd64 -t "pa-investing-backend:${pa_tag}" .
+docker save "pa-investing-backend:${pa_tag}" -o "pa-investing-backend-${pa_tag}.tar"
+echo "Built pa-investing-backend:${pa_tag}"
+```
+
+Build TradeAgent separately:
+
+```bash
+cd /Users/chenkangan/Documents/TradeAgent
+
+ta_tag=$(git rev-parse --short HEAD)
+docker build --platform linux/amd64 -t "trade-research:${ta_tag}" .
+docker save "trade-research:${ta_tag}" -o "trade-research-${ta_tag}.tar"
+echo "Built trade-research:${ta_tag}"
 ```
 
 Use `linux/amd64` for the UGREEN DXP4800 Plus.
 
-The output tar is a local deployment artifact, for example:
+The output tars are local deployment artifacts, for example:
 
 ```text
 backend/pa-investing-backend-d535cef.tar
+TradeAgent/trade-research-1a2b3c4.tar
 ```
 
 Do not commit Docker image tar files.
 
-## 2. Copy two deployment files to NAS
+## 2. Copy deployment files to NAS
 
-Copy these two files to a NAS folder visible from the UGREEN Docker app:
+Copy these files to a NAS folder visible from the UGREEN Docker app:
 
 ```text
 backend/pa-investing-backend-<tag>.tar
+TradeAgent/trade-research-<tag>.tar
 backend/docker-compose.ugreen-lan.yml
 ```
 
@@ -70,11 +84,12 @@ For example:
 
 ```text
 /volume1/docker/images/pa-investing-backend-<tag>.tar
+/volume1/docker/images/trade-research-<tag>.tar
 /volume1/docker/pa-investing/docker-compose.ugreen-lan.yml
 ```
 
-SMB, UGREEN file manager, or NAS folder sync are fine for copying these files. The tar is a built
-artifact, not a live source-code deployment folder.
+SMB, UGREEN file manager, or NAS folder sync are fine for copying these files. The tars are built
+artifacts, not a live source-code deployment folder.
 
 ## 3. Import the image in UGREEN Docker
 
@@ -84,16 +99,18 @@ In the UGREEN Docker app:
 镜像 → 本地镜像 → 添加镜像 → 从NAS导入
 ```
 
-Select:
+Import both image tars:
 
 ```text
 pa-investing-backend-<tag>.tar
+trade-research-<tag>.tar
 ```
 
-After import, local images should show:
+After import, local images should show both:
 
 ```text
 pa-investing-backend:<tag>
+trade-research:<tag>
 ```
 
 If the image appears as `<none>` or `镜像异常`, the import did not produce a usable tagged image.
@@ -105,6 +122,7 @@ Do not create/update the project until the image is healthy.
 Use Docker Project / Compose rather than manually creating a single container. The app needs both:
 
 - `backend-api`
+- `research-api`
 - `postgres`
 
 In UGREEN Docker:
@@ -119,6 +137,7 @@ The important image setting is:
 
 ```text
 PA_BACKEND_IMAGE=pa-investing-backend:<tag>
+TRADE_RESEARCH_IMAGE=trade-research:<tag>
 ```
 
 For this LAN Compose file, port exposure is controlled by:
@@ -135,19 +154,27 @@ Set these in the UGREEN Docker Project environment:
 
 ```text
 PA_BACKEND_IMAGE=pa-investing-backend:<tag>
+TRADE_RESEARCH_IMAGE=trade-research:<tag>
+COMPOSE_PROFILES=research
 PA_POSTGRES_PASSWORD=<long unique password>
 
 PA_IBKR_FLEX_TOKEN=<IBKR Flex token>
 PA_IBKR_FLEX_QUERY_ID=<current positions Flex Query ID>
 PA_IBKR_FLEX_HISTORY_QUERY_ID=<YTD daily history Flex Query ID>
 PA_IBKR_FLEX_TIMEZONE=Europe/London
-PA_IBKR_FLEX_REFRESH_COOLDOWN_SECONDS=900
+PA_IBKR_FLEX_REFRESH_COOLDOWN_SECONDS=300
 PA_MARKET_DATA_RECONCILIATION_TOLERANCE=0.01
 
 PA_ANALYTICS_AUTH_ENABLED=true
 PA_ANALYTICS_AUTH_USERNAME=<dashboard username>
 PA_ANALYTICS_AUTH_PASSWORD=<dashboard password>
 PA_WORKFLOW_API_TOKEN=<long unique token>
+
+PA_TRADE_RESEARCH_ENABLED=true
+PA_TRADE_RESEARCH_BASE_URL=http://research-api:8000
+PA_TRADE_RESEARCH_API_TOKEN=<long unique token shared with TradeAgent>
+PA_TRADE_RESEARCH_TIMEOUT_SECONDS=20
+TRADE_RESEARCH_PRICE_PROVIDER=yahoo
 
 PA_DEFAULT_BASE_CURRENCY=GBP
 PA_NAS_HTTP_PORT=8000
@@ -169,8 +196,10 @@ PA_MARKET_DATA_PROVIDER=twelve_data
 PA_TWELVE_DATA_API_KEY=<Twelve Data key>
 ```
 
-Use distinct secrets for PostgreSQL, dashboard auth, and workflow token. Do not reuse the IBKR,
-Notion, NAS administrator, or Tailscale credentials.
+Use distinct secrets for PostgreSQL, dashboard auth, workflow token, and TradeAgent auth. Do not
+reuse the IBKR, Notion, NAS administrator, or Tailscale credentials. The
+`PA_TRADE_RESEARCH_API_TOKEN` value is the private bearer token that PAMASTER uses when it calls the
+internal `research-api` service; iPhone and desktop browsers never receive it.
 
 ## 6. Run database migrations
 
@@ -250,13 +279,27 @@ The Portfolio page should show:
 - `Positions query` and `History query` freshness labels;
 - buttons for `Refresh Positions` and `Refresh History`.
 
+The Research Playground is available at:
+
+```text
+http://192.168.1.137:8000/analysis/research
+```
+
+It should list TradeAgent skills when the `research-api` container is running and
+`PA_TRADE_RESEARCH_API_TOKEN` is set in the Docker Project environment.
+
+TradeAgent is an additive service. Existing PA Master deployments can omit
+`COMPOSE_PROFILES=research`, `TRADE_RESEARCH_IMAGE`, and all
+`PA_TRADE_RESEARCH_*` values; the portfolio and analytics pages continue to run
+without the research container.
+
 ## 9. First browser refresh
 
 Use the browser buttons instead of opening the Docker terminal for normal manual refreshes:
 
 1. Click `Refresh Positions`.
 2. Confirm the status mentions positions and trades.
-3. Wait for the IBKR cooldown, usually 15 minutes.
+3. Wait for the IBKR cooldown, usually 5 minutes.
 4. Click `Refresh History`.
 5. Confirm the `Positions query` and `History query` freshness labels updated.
 6. Confirm the P&L Calendar and Latest Broker P&L Contributors show the latest broker report date
@@ -370,7 +413,7 @@ another account.
 For now, the lowest-friction manual NAS operation is the browser flow:
 
 ```text
-Refresh Positions → wait 15 minutes → Refresh History
+Refresh Positions → wait 5 minutes → Refresh History
 ```
 
 If you later configure UGOS scheduled tasks and the NAS has Docker Compose terminal support, use
@@ -428,7 +471,7 @@ curl -v http://192.168.1.137:8000/health
 ### `IBKR Flex request failed (1018): Too many requests`
 
 IBKR is rate-limiting requests from the Flex token. Wait at least
-`PA_IBKR_FLEX_REFRESH_COOLDOWN_SECONDS`, normally 900 seconds, before running the other IBKR query.
+`PA_IBKR_FLEX_REFRESH_COOLDOWN_SECONDS`, normally 300 seconds, before running the other IBKR query.
 This is why the dashboard has separate `Refresh Positions` and `Refresh History` buttons.
 
 ### `IBKR history import returned no daily history rows`

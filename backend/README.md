@@ -961,3 +961,15 @@ pytest
 ruff check .
 docker compose config
 ```
+
+### Start locally and open the analytics frontend
+
+From the `backend` directory, run:
+
+```bash
+./scripts/start_local.sh
+```
+
+The launcher uses the existing `.env` and database, waits for `/health`, and opens
+`/analysis/portfolio` in the default browser. It does not import or replace positions.
+Set `PA_OPEN_BROWSER=false` for a headless run, or `PA_RELOAD=true` during development.

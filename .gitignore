@@ -1,5 +1,6 @@
 .superpowers/sdd/
 .worktrees/
+.DS_Store
 __pycache__/
 *.py[cod]
 .pytest_cache/
@@ -9,4 +10,5 @@ backend/market_data_mappings.local.csv
 backend/*.db
 backend/*.db-*
 backend/*.sqlite*
+backend/*.tar
 backend/backups/
